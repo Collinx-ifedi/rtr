@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-background">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0D0500" />
+  <meta name="description" content="Secure sign-in for the Rocky Trendy Realities admin console." />
+  <title>Sign In · RTR Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body data-page="login">
+  <main class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="sb-brand-icon">RTR</span>
+        <h1 class="auth-title">ADMIN CONSOLE</h1>
+        <p class="auth-sub">Rocky Trendy Realities · Sign in to continue</p>
+      </div>
+
+      <form id="login-form" novalidate>
+        <div class="form-group">
+          <label for="login-username">Username</label>
+          <input id="login-username" name="username" type="text" autocomplete="username" placeholder="admin" required />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required />
+        </div>
+        <button class="btn btn-primary btn-block" id="login-submit" type="submit">
+          <i data-lucide="log-in"></i>Sign In
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="/static/js/admin.js"></script>
+  <script>
+    (function () {
+      var form = document.getElementById('login-form');
+      var btn = document.getElementById('login-submit');
+      var DEST = 'admin-dashboard.html';
+
+      // If already signed in, skip the login screen.
+      if (window.RTR && window.RTR.Auth && window.RTR.Auth.isAuthed()) {
+        window.location.href = DEST;
+      }
+
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var username = document.getElementById('login-username').value.trim();
+        var password = document.getElementById('login-password').value;
+        if (!username || !password) {
+          window.RTR && window.RTR.Notify.warning('Enter your username and password');
+          return;
+        }
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner spinner-sm"></span> Signing in…';
+        try {
+          await window.RTR.Auth.login(username, password);
+          window.RTR.Notify.success('Welcome back');
+          window.location.href = DEST;
+        } catch (err) {
+          window.RTR.Notify.error((err && err.message) || 'Sign in failed');
+          btn.disabled = false;
+          btn.innerHTML = original;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
