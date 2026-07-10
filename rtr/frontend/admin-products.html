@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-background">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0D0500" />
+  <meta name="description" content="Manage the Rocky Trendy Realities furniture catalog — add, edit and track inventory." />
+  <title>Products · RTR Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body data-page="products">
+  <div class="app-shell">
+    <!-- ============ SIDEBAR ============ -->
+    <aside id="sidebar" aria-label="Primary navigation">
+      <div class="sb-brand">
+        <span class="sb-brand-icon">RTR</span>
+        <span class="sb-brand-text">ROCKY TRENDY<small>Realities Admin</small></span>
+      </div>
+      <nav class="sb-nav">
+        <div class="sb-section">Overview</div>
+        <a class="sb-link" data-href="admin-dashboard.html" href="admin-dashboard.html">
+          <i data-lucide="layout-dashboard"></i><span>Dashboard</span>
+        </a>
+        <a class="sb-link" data-href="admin-products.html" href="admin-products.html">
+          <i data-lucide="package"></i><span>Products</span>
+        </a>
+        <div class="sb-section">Engagement</div>
+        <a class="sb-link" data-href="admin-content.html" href="admin-content.html">
+          <i data-lucide="layout-template"></i><span>Content &amp; Email</span>
+        </a>
+      </nav>
+      <div class="sb-foot">
+        <div class="sb-user">
+          <span class="sb-avatar js-admin-initials">AD</span>
+          <div class="sb-user-info">
+            <div class="sb-user-name js-admin-name">Administrator</div>
+            <div class="sb-user-role js-admin-role">Store Owner</div>
+          </div>
+          <button class="icon-btn" data-logout aria-label="Sign out"><i data-lucide="log-out"></i></button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div id="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn mob-toggle" aria-label="Toggle menu"><i data-lucide="menu"></i></button>
+          <h1 class="topbar-title">Products</h1>
+        </div>
+        <div class="topbar-right">
+          <button class="btn btn-ghost btn-sm" id="products-export"><i data-lucide="download"></i><span class="hide-mobile">Export</span></button>
+          <button class="btn btn-primary btn-sm" data-open-product><i data-lucide="plus"></i>Add Product</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- PRODUCT KPI OVERVIEW -->
+        <section aria-label="Catalog metrics">
+          <div class="stat-grid-6">
+            <div class="stat-card">
+              <div class="stat-icon brown-bg"><i data-lucide="package"></i></div>
+              <div class="stat-label">Total Products</div>
+              <div class="stat-value" id="pkpi-total">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon green-bg"><i data-lucide="check-circle"></i></div>
+              <div class="stat-label">Active</div>
+              <div class="stat-value" id="pkpi-active">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon red-bg"><i data-lucide="alert-triangle"></i></div>
+              <div class="stat-label">Low Stock</div>
+              <div class="stat-value red" id="pkpi-low">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon red-bg"><i data-lucide="x-octagon"></i></div>
+              <div class="stat-label">Out of Stock</div>
+              <div class="stat-value" id="pkpi-out">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon purple-bg"><i data-lucide="star"></i></div>
+              <div class="stat-label">Featured</div>
+              <div class="stat-value" id="pkpi-featured">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon blue-bg"><i data-lucide="layers"></i></div>
+              <div class="stat-label">Categories</div>
+              <div class="stat-value" id="pkpi-cats">0</div>
+            </div>
+          </div>
+        </section>
+
+        <div class="two-col-catalog">
+          <!-- CATALOG -->
+          <section aria-label="Product catalog">
+            <!-- TOOLBAR -->
+            <div class="toolbar">
+              <div class="search-input-wrap toolbar-grow">
+                <i data-lucide="search"></i>
+                <input class="search-input" id="product-search" type="search" placeholder="Search products…" aria-label="Search products" />
+              </div>
+              <select class="select-inline" id="product-sort" aria-label="Sort products">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="price-hi">Price: High to Low</option>
+                <option value="price-lo">Price: Low to High</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
+              <div class="seg" id="view-toggle" role="group" aria-label="View mode">
+                <button class="seg-btn active" data-view="grid" aria-label="Grid view"><i data-lucide="layout-grid"></i></button>
+                <button class="seg-btn" data-view="list" aria-label="List view"><i data-lucide="list"></i></button>
+              </div>
+            </div>
+
+            <div class="filter-tabs" id="product-filter-tabs">
+              <button class="ftab on" data-value="all">All</button>
+              <button class="ftab" data-value="sofa">Sofas &amp; Seating</button>
+              <button class="ftab" data-value="table">Tables &amp; Desks</button>
+              <button class="ftab" data-value="dining">Dining</button>
+              <button class="ftab" data-value="bedroom">Bedroom</button>
+              <button class="ftab" data-value="office">Office</button>
+              <button class="ftab" data-value="finish">Home Finishes</button>
+              <button class="ftab" data-value="decor">Decor &amp; Accents</button>
+            </div>
+
+            <div class="count-label" id="prod-count-label">Loading products…</div>
+
+            <!-- GRID VIEW -->
+            <div class="product-grid" id="admin-prod-grid"></div>
+
+            <!-- LIST VIEW -->
+            <div class="card hidden" id="products-table-wrap">
+              <div class="tbl-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th></th><th>Product</th><th>SKU</th><th>Category</th><th>Price</th>
+                      <th>Stock</th><th>Status</th><th>Created</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="products-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="pagination" id="products-pagination"></div>
+          </section>
+
+          <!-- INVENTORY ALERTS SIDEBAR -->
+          <aside aria-label="Inventory alerts">
+            <div class="card">
+              <div class="card-head"><div class="card-title">Inventory Alerts</div></div>
+              <div class="card-body"><div id="inventory-alerts"></div></div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- PRODUCT EDITOR MODAL -->
+  <div class="modal-bg" id="product-modal">
+    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="pm-modal-title">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="pm-modal-title">Add Product</div>
+          <div class="modal-sub">Fill in the product details below</div>
+        </div>
+        <button class="modal-close" data-modal-close="product-modal" aria-label="Close"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="editor-grid">
+          <!-- IMAGES -->
+          <div class="form-group">
+            <label>Product Images</label>
+            <div class="upload-zone" id="pm-upload-zone">
+              <input type="file" accept="image/*" multiple aria-label="Upload product images" />
+              <span class="uz-icon"><i data-lucide="image-plus"></i></span>
+              <p>Drag &amp; drop images here, or click to browse</p>
+              <small>JPG, PNG, WEBP or AVIF · up to 8MB each</small>
+            </div>
+            <div class="image-preview-grid" id="pm-image-preview"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="pm-name">Product Name</label>
+            <input id="pm-name" type="text" placeholder="e.g. Milano Velvet 3-Seater Sofa" maxlength="255" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="pm-cat">Category</label>
+              <select id="pm-cat">
+                <option value="">Select category…</option>
+                <option value="sofa">Sofas &amp; Seating</option>
+                <option value="table">Tables &amp; Desks</option>
+                <option value="dining">Dining</option>
+                <option value="bedroom">Bedroom</option>
+                <option value="office">Office</option>
+                <option value="finish">Home Finishes</option>
+                <option value="decor">Decor &amp; Accents</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="pm-badge">Badge <span class="field-hint">optional</span></label>
+              <select id="pm-badge">
+                <option value="">None</option>
+                <option value="new">New</option>
+                <option value="sale">Sale</option>
+                <option value="hot">Hot</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row-3">
+            <div class="form-group">
+              <label for="pm-price">Price (NGN)</label>
+              <input id="pm-price" type="number" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label for="pm-old-price">Old Price <span class="field-hint">optional</span></label>
+              <input id="pm-old-price" type="number" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label for="pm-cost">Cost <span class="field-hint">optional</span></label>
+              <input id="pm-cost" type="number" min="0" step="0.01" placeholder="0.00" />
+            </div>
+          </div>
+
+          <div class="margin-display hidden" id="pm-margin">Margin: 0%</div>
+
+          <div class="form-group">
+            <label for="pm-quantity">Stock Quantity</label>
+            <input id="pm-quantity" type="number" min="0" step="1" placeholder="0" />
+          </div>
+
+          <div class="form-group">
+            <label for="pm-desc">Description</label>
+            <textarea id="pm-desc" placeholder="Describe the materials, dimensions and craftsmanship…" maxlength="4000"></textarea>
+          </div>
+
+          <label class="checkbox-line">
+            <input type="checkbox" id="pm-featured" />
+            <span>Feature this product on the storefront</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-modal-close="product-modal">Cancel</button>
+        <button class="btn btn-primary" id="pm-save"><i data-lucide="save"></i>Save Product</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>
