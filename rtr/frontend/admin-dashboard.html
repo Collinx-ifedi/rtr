@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-background">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0D0500" />
+  <meta name="description" content="Rocky Trendy Realities admin dashboard — sales, orders and customer overview." />
+  <title>Dashboard · RTR Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body data-page="dashboard">
+  <div class="app-shell">
+    <!-- ============ SIDEBAR ============ -->
+    <aside id="sidebar" aria-label="Primary navigation">
+      <div class="sb-brand">
+        <span class="sb-brand-icon">RTR</span>
+        <span class="sb-brand-text">ROCKY TRENDY<small>Realities Admin</small></span>
+      </div>
+      <nav class="sb-nav">
+        <div class="sb-section">Overview</div>
+        <a class="sb-link" data-href="admin-dashboard.html" href="admin-dashboard.html">
+          <i data-lucide="layout-dashboard"></i><span>Dashboard</span>
+        </a>
+        <a class="sb-link" data-href="admin-products.html" href="admin-products.html">
+          <i data-lucide="package"></i><span>Products</span>
+        </a>
+        <div class="sb-section">Engagement</div>
+        <a class="sb-link" data-href="admin-content.html" href="admin-content.html">
+          <i data-lucide="layout-template"></i><span>Content &amp; Email</span>
+        </a>
+        <a class="sb-link" href="#orders-section">
+          <i data-lucide="shopping-bag"></i><span>Orders</span>
+        </a>
+        <a class="sb-link" href="#customers-section">
+          <i data-lucide="users"></i><span>Customers</span>
+        </a>
+      </nav>
+      <div class="sb-foot">
+        <div class="sb-user">
+          <span class="sb-avatar js-admin-initials">AD</span>
+          <div class="sb-user-info">
+            <div class="sb-user-name js-admin-name">Administrator</div>
+            <div class="sb-user-role js-admin-role">Store Owner</div>
+          </div>
+          <button class="icon-btn" data-logout aria-label="Sign out"><i data-lucide="log-out"></i></button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div id="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn mob-toggle" aria-label="Toggle menu"><i data-lucide="menu"></i></button>
+          <h1 class="topbar-title">Dashboard</h1>
+        </div>
+        <div class="topbar-right">
+          <button class="btn btn-ghost btn-sm" data-quick="banner"><i data-lucide="image"></i><span class="hide-mobile">Banner</span></button>
+          <button class="btn btn-primary btn-sm" data-quick="add-product"><i data-lucide="plus"></i>New Product</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- KPI CARDS -->
+        <section aria-label="Key metrics">
+          <div class="stat-grid-6">
+            <div class="stat-card">
+              <div class="stat-icon green-bg"><i data-lucide="banknote"></i></div>
+              <div class="stat-label">Total Revenue</div>
+              <div class="stat-value caramel js-kpi-value" id="kpi-revenue">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon brown-bg"><i data-lucide="shopping-cart"></i></div>
+              <div class="stat-label">Total Orders</div>
+              <div class="stat-value js-kpi-value" id="kpi-orders">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon blue-bg"><i data-lucide="users"></i></div>
+              <div class="stat-label">Customers</div>
+              <div class="stat-value js-kpi-value" id="kpi-customers">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon red-bg"><i data-lucide="clock"></i></div>
+              <div class="stat-label">Pending Orders</div>
+              <div class="stat-value js-kpi-value" id="kpi-pending">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon purple-bg"><i data-lucide="package"></i></div>
+              <div class="stat-label">Products</div>
+              <div class="stat-value js-kpi-value" id="kpi-products">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon green-bg"><i data-lucide="trending-up"></i></div>
+              <div class="stat-label">Avg. Order Value</div>
+              <div class="stat-value js-kpi-value" id="kpi-aov">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CHARTS -->
+        <section class="analytics-grid" aria-label="Analytics">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Revenue Trend</div>
+                <div class="modal-sub">Last 7 days</div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="chart-container"><div class="chart-area" id="rev-chart"></div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div class="card-title">Category Mix</div></div>
+            <div class="card-body">
+              <div id="category-donut" class="donut-row"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- RECENT ORDERS + RECENT CUSTOMERS -->
+        <section class="analytics-grid" aria-label="Recent activity">
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Recent Orders</div>
+              <button class="btn btn-ghost btn-xs" data-quick="orders">View all</button>
+            </div>
+            <div class="tbl-wrap">
+              <table>
+                <thead>
+                  <tr><th>Ref</th><th>Customer</th><th>Product</th><th>Total</th><th>Date</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody id="recent-orders-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div class="card-title">New Customers</div></div>
+            <div class="card-body"><div id="recent-customers" class="activity-list"></div></div>
+          </div>
+        </section>
+
+        <!-- MANAGEMENT TABS: ORDERS / CUSTOMERS -->
+        <section id="orders-section" aria-label="Management">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="panel-orders" role="tab">Order Management</button>
+            <button class="tab" data-tab="panel-customers" role="tab">Customer Management</button>
+          </div>
+
+          <!-- ORDERS PANEL -->
+          <div class="tab-panel active" id="panel-orders" role="tabpanel">
+            <div class="toolbar">
+              <div class="search-input-wrap toolbar-grow">
+                <i data-lucide="search"></i>
+                <input class="search-input" id="order-search" type="search" placeholder="Search orders by ref, email or phone…" aria-label="Search orders" />
+              </div>
+              <div class="filter-tabs" id="order-filter-tabs">
+                <button class="ftab on" data-value="all">All</button>
+                <button class="ftab" data-value="pending">Pending</button>
+                <button class="ftab" data-value="paid">Paid</button>
+                <button class="ftab" data-value="processing">Processing</button>
+                <button class="ftab" data-value="shipped">Shipped</button>
+                <button class="ftab" data-value="delivered">Delivered</button>
+                <button class="ftab" data-value="cancelled">Cancelled</button>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="orders-export"><i data-lucide="download"></i>Export</button>
+            </div>
+            <div class="card">
+              <div class="tbl-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ref</th><th>Customer</th><th>Product</th><th>Qty</th><th>Total</th>
+                      <th class="hide-mobile">Shipping</th><th class="hide-mobile">Phone</th><th>Date</th><th>Status</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="orders-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- CUSTOMERS PANEL -->
+          <div class="tab-panel" id="panel-customers" role="tabpanel">
+            <div id="customers-section" class="toolbar">
+              <div class="search-input-wrap toolbar-grow">
+                <i data-lucide="search"></i>
+                <input class="search-input" id="customer-search" type="search" placeholder="Search customers…" aria-label="Search customers" />
+              </div>
+            </div>
+            <div class="card">
+              <div class="tbl-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Customer</th><th>Country</th><th>Balance</th><th>Verification</th><th>Status</th><th>Action</th></tr>
+                  </thead>
+                  <tbody id="customers-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ORDER DETAIL MODAL -->
+  <div class="modal-bg" id="order-modal">
+    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="om-title">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="om-title">Order</div>
+          <div class="modal-sub">Review and fulfill this order</div>
+        </div>
+        <button class="modal-close" data-modal-close="order-modal" aria-label="Close"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body" id="om-body"></div>
+      <div class="modal-foot" id="om-foot"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>
