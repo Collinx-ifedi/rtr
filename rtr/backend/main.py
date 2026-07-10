@@ -46,7 +46,7 @@ from sqlalchemy import select, desc, delete, func, case, update, or_
 from sqlalchemy.orm import selectinload
 
 # --- LOCAL MODULES ---
-from db import get_db, init_db
+from .db import get_db, init_db
 from core import (
     settings, 
     get_current_admin, 
