@@ -47,7 +47,7 @@ from sqlalchemy.orm import selectinload
 
 # --- LOCAL MODULES ---
 from .db import get_db, init_db
-from core import (
+from .core import (
     settings, 
     get_current_admin, 
     get_current_user,
@@ -55,10 +55,10 @@ from core import (
     create_access_token, 
     require_superadmin
 )
-from utils import logger
+from .utils import logger
 
 # --- SERVICES ---
-from services import (
+from .services import (
     create_user_service,
     resend_otp_service,
     verify_user_email_service,
@@ -72,10 +72,10 @@ from services import (
     mark_inbox_message_read_service,
     moderate_user_service
 )
-from ai_services import get_ai_service, AIService
+from .ai_services import get_ai_service, AIService
 
 # --- SCHEMAS & MODELS ---
-from models_schemas import (
+from .models_schemas import (
     UserCreateSchema, 
     AdminLoginSchema, 
     PhysicalOrderCreate, 

@@ -13,7 +13,7 @@ import httpx
 from fastapi import HTTPException, status
 
 # Corrected import path reflecting the local core.py structure
-from core import settings
+from .core import settings
 
 # Setup logging for production monitoring
 logger = logging.getLogger("app.paystack")

@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import update
 
 # IMPORT MODELS
-from models_schemas import (
+from .models_schemas import (
     User,
     Admin,
     Product,
@@ -29,14 +29,14 @@ from models_schemas import (
 )
 
 # IMPORT UTILS & CORE
-from utils import (
+from .utils import (
     generate_otp,
     send_email_otp,
     send_fulfillment_email,
     log_action
 )
 
-from core import (
+from .core import (
     create_access_token,
     hash_password,
     verify_password,
@@ -44,7 +44,7 @@ from core import (
 )
 
 # IMPORT PAYSTACK (From your newly added paystack.py)
-from paystack import initialize_transaction
+from .paystack import initialize_transaction
 
 # =========================================================
 # CONFIG & LOGGING

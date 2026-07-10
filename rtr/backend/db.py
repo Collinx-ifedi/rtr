@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy import text
 from dotenv import load_dotenv
 
-from models_schemas import Base
+from .models_schemas import Base
 
 # ======================================================
 # 1. CONFIGURATION & LOGGING
