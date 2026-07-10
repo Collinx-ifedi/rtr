@@ -11,6 +11,7 @@ pydantic[email]
 SQLAlchemy
 asyncpg
 greenlet
+passlib
 
 # -----------------------------------------------------------------------------
 # Authentication & Cryptography
