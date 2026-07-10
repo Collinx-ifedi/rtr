@@ -25,4 +25,4 @@ Paystack
 # -----------------------------------------------------------------------------
 httpx
 cloudinary
-jose
+python-jose[cryptography]
