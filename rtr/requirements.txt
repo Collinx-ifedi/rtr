@@ -12,6 +12,7 @@ SQLAlchemy
 asyncpg
 greenlet
 passlib
+pydantic-settings
 
 # -----------------------------------------------------------------------------
 # Authentication & Cryptography
