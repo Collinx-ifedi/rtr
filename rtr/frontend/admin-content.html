@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-background">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0D0500" />
+  <meta name="description" content="Manage storefront hero banners, floating imagery, email campaigns and client outreach for Rocky Trendy Realities." />
+  <title>Content &amp; Email · RTR Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body data-page="content">
+  <div class="app-shell">
+    <!-- ============ SIDEBAR ============ -->
+    <aside id="sidebar" aria-label="Primary navigation">
+      <div class="sb-brand">
+        <span class="sb-brand-icon">RTR</span>
+        <span class="sb-brand-text">ROCKY TRENDY<small>Realities Admin</small></span>
+      </div>
+      <nav class="sb-nav">
+        <div class="sb-section">Overview</div>
+        <a class="sb-link" data-href="admin-dashboard.html" href="admin-dashboard.html">
+          <i data-lucide="layout-dashboard"></i><span>Dashboard</span>
+        </a>
+        <a class="sb-link" data-href="admin-products.html" href="admin-products.html">
+          <i data-lucide="package"></i><span>Products</span>
+        </a>
+        <div class="sb-section">Engagement</div>
+        <a class="sb-link" data-href="admin-content.html" href="admin-content.html">
+          <i data-lucide="layout-template"></i><span>Content &amp; Email</span>
+        </a>
+      </nav>
+      <div class="sb-foot">
+        <div class="sb-user">
+          <span class="sb-avatar js-admin-initials">AD</span>
+          <div class="sb-user-info">
+            <div class="sb-user-name js-admin-name">Administrator</div>
+            <div class="sb-user-role js-admin-role">Store Owner</div>
+          </div>
+          <button class="icon-btn" data-logout aria-label="Sign out"><i data-lucide="log-out"></i></button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div id="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn mob-toggle" aria-label="Toggle menu"><i data-lucide="menu"></i></button>
+          <h1 class="topbar-title">Content &amp; Email</h1>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="panel-hero" role="tab">Hero &amp; Banners</button>
+          <button class="tab" data-tab="panel-email" role="tab">Email Studio</button>
+          <button class="tab" data-tab="panel-campaigns" role="tab">Campaigns</button>
+        </div>
+
+        <!-- ===================== HERO & BANNERS ===================== -->
+        <div class="tab-panel active" id="panel-hero" role="tabpanel">
+          <div class="two-col">
+            <!-- EDITOR -->
+            <div class="card">
+              <div class="card-head"><div class="card-title">Hero Content</div></div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label for="hero-eyebrow">Eyebrow <span class="field-hint">small label above title</span></label>
+                  <input id="hero-eyebrow" type="text" placeholder="New Collection" maxlength="60" />
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="hero-h1">Title (line 1)</label>
+                    <input id="hero-h1" type="text" placeholder="Timeless Comfort," maxlength="80" value="Timeless Comfort," />
+                  </div>
+                  <div class="form-group">
+                    <label for="hero-h2">Title emphasis (line 2)</label>
+                    <input id="hero-h2" type="text" placeholder="Crafted for You" maxlength="80" value="Crafted for You" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="hero-sub">Subtitle</label>
+                  <textarea id="hero-sub" maxlength="200" placeholder="Discover handcrafted furniture that elevates every space.">Discover handcrafted furniture that elevates every space.</textarea>
+                </div>
+                <div class="form-group">
+                  <label for="hero-cta">Call-to-action label</label>
+                  <input id="hero-cta" type="text" placeholder="Shop the Collection" maxlength="40" value="Shop the Collection" />
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="form-group">
+                  <label>Background image</label>
+                  <div class="upload-zone" id="hero-upload-zone">
+                    <input type="file" id="hero-bg-input" accept="image/*" aria-label="Upload hero background" />
+                    <span class="uz-icon"><i data-lucide="image-plus"></i></span>
+                    <p>Click or drop a hero background</p>
+                    <small>Recommended 1920×720 · JPG or WEBP</small>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="hero-bg-url">…or paste an image URL</label>
+                  <div class="flex gap-2">
+                    <input id="hero-bg-url" type="url" placeholder="https://…" class="flex-1" />
+                    <button class="btn btn-ghost" id="hero-bg-url-apply" type="button">Apply</button>
+                  </div>
+                </div>
+
+                <button class="btn btn-primary btn-block" id="hero-save"><i data-lucide="save"></i>Save Hero Content</button>
+              </div>
+            </div>
+
+            <!-- LIVE PREVIEW + BANNER LIST -->
+            <div>
+              <div class="card mb-2">
+                <div class="card-head"><div class="card-title">Live Preview</div></div>
+                <div class="card-body">
+                  <div class="hero-preview">
+                    <img class="hero-preview-img" id="hero-bg-preview" src="" alt="" onerror="this.style.visibility='hidden'" />
+                    <div class="hero-preview-overlay">
+                      <div class="hero-preview-text">
+                        <h2><span id="prev-title">Timeless Comfort,</span> <em id="prev-title-em">Crafted for You</em></h2>
+                        <p id="prev-sub">Discover handcrafted furniture that elevates every space.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-title">Floating Images</div>
+                  <button class="btn btn-ghost btn-xs" id="add-float-img"><i data-lucide="plus"></i>Add</button>
+                </div>
+                <div class="card-body"><div id="float-img-list" class="float-img-list"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mt-3">
+            <div class="card-head"><div class="card-title">Existing Banners</div></div>
+            <div class="card-body"><div id="banner-list" class="grid gap-2"></div></div>
+          </div>
+        </div>
+
+        <!-- ===================== EMAIL STUDIO ===================== -->
+        <div class="tab-panel" id="panel-email" role="tabpanel">
+          <div class="two-col-catalog">
+            <!-- COMPOSER -->
+            <section>
+              <div class="section-head">
+                <div>
+                  <div class="section-title">Templates</div>
+                  <div class="section-sub">Pick a starting point, then customize</div>
+                </div>
+              </div>
+              <div class="template-grid" id="template-grid"></div>
+
+              <div class="email-compose">
+                <div class="form-group">
+                  <label>Recipients</label>
+                  <div class="client-chips" id="recipient-chips">
+                    <input id="recipient-input" type="text" placeholder="Type an email and press Enter…" aria-label="Add recipient" />
+                  </div>
+                  <div class="client-suggestions" id="client-suggestions" style="display:none"></div>
+                </div>
+                <div class="form-group">
+                  <label for="email-subject">Subject</label>
+                  <input id="email-subject" type="text" placeholder="Subject line…" maxlength="200" />
+                </div>
+                <div class="form-group">
+                  <label for="email-body">Message</label>
+                  <div class="email-body-area" id="email-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Email body"></div>
+                </div>
+                <div class="flex justify-end gap-2">
+                  <button class="btn btn-ghost" id="email-clear"><i data-lucide="eraser"></i>Clear</button>
+                  <button class="btn btn-primary" id="email-send"><i data-lucide="send"></i>Send Email</button>
+                </div>
+              </div>
+            </section>
+
+            <!-- CLIENT DIRECTORY -->
+            <aside>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-title">Clients</div>
+                  <span class="badge no-dot neutral" id="client-count-label">0 clients</span>
+                </div>
+                <div class="card-body">
+                  <div class="search-input-wrap mb-2">
+                    <i data-lucide="search"></i>
+                    <input class="search-input" id="client-search" type="search" placeholder="Search clients…" aria-label="Search clients" />
+                  </div>
+                </div>
+                <div id="client-list"></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <!-- ===================== CAMPAIGNS ===================== -->
+        <div class="tab-panel" id="panel-campaigns" role="tabpanel">
+          <div class="section-head">
+            <div>
+              <div class="section-title">Marketing Campaigns</div>
+              <div class="section-sub">Track sends, opens and clicks</div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="campaign-create"><i data-lucide="plus"></i>New Campaign</button>
+          </div>
+          <div class="three-col" id="campaign-list"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>
