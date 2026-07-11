@@ -28,3 +28,4 @@ Paystack
 httpx
 cloudinary
 python-jose[cryptography]
+python-multipart
