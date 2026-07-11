@@ -176,15 +176,10 @@ app = FastAPI(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-origins = ["http://localhost:3000", "http://localhost:8000"]
-if hasattr(settings, 'FRONTEND_URL') and settings.FRONTEND_URL:
-    origins.append(settings.FRONTEND_URL)
-if hasattr(settings, 'ADMIN_FRONTEND_URL') and settings.ADMIN_FRONTEND_URL:
-    origins.append(settings.ADMIN_FRONTEND_URL)
-
+# Permissive CORS for decoupled external storefront APIs
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -565,35 +560,49 @@ app.include_router(order_router)
 app.include_router(admin_router)
 
 # =========================================================
-# 7. FRONTEND STATIC & SPA ROUTING
+# 7. FRONTEND PAGE ROUTES (ADMIN PORTAL ONLY)
 # =========================================================
 
 @app.get("/")
-async def serve_index(): 
-    index_file = FRONTEND_DIR / "rocky-trendy-realities.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-    return JSONResponse(status_code=404, content={"detail": "Frontend storefront index not found."})
+async def serve_admin_root():
+    """Redirects or serves the admin login page when accessing the root domain."""
+    admin_login = FRONTEND_DIR / "admin-login.html"
+    if admin_login.exists():
+        return FileResponse(admin_login)
+    return JSONResponse(status_code=404, content={"detail": "Admin login interface not found."})
 
 @app.get("/admin")
-async def serve_admin_index(): 
-    admin_file = FRONTEND_DIR / "rtr-admin.html"
-    if admin_file.exists():
-        return FileResponse(admin_file)
-    return JSONResponse(status_code=404, content={"detail": "Admin portal index not found."})
+async def serve_admin_alias():
+    """Allows accessing the admin login via /admin directly."""
+    admin_login = FRONTEND_DIR / "admin-login.html"
+    if admin_login.exists():
+        return FileResponse(admin_login)
+    return JSONResponse(status_code=404, content={"detail": "Admin login interface not found."})
 
 @app.get("/{page_name}.html")
 async def serve_html_pages(page_name: str):
+    """
+    Dynamically captures and serves specific admin pages 
+    (e.g., admin-dashboard.html, admin-products.html, admin-content.html)
+    """
     file_path = FRONTEND_DIR / f"{page_name}.html"
     if file_path.exists():
         return FileResponse(file_path)
-    return JSONResponse(status_code=404, content={"detail": "Requested page not found."})
-
-if FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    return JSONResponse(status_code=404, content={"detail": f"Admin page '{page_name}.html' not found."})
 
 # =========================================================
-# 8. LOCAL EXECUTION ENTRY POINT
+# 8. STATIC FILES (CSS, JS, Images for Admin Panel)
+# =========================================================
+
+# Ensure your CSS/JS assets inside frontend/static are accessible
+static_dir = FRONTEND_DIR / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+elif FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+# =========================================================
+# 9. LOCAL EXECUTION ENTRY POINT
 # =========================================================
 
 if __name__ == "__main__":
