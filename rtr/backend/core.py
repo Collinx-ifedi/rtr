@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Union
 
-from fastapi import HTTPException, Depends, status
+from fastapi import HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -22,8 +22,8 @@ from sqlalchemy.future import select
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import ValidationError, Field
 
-from .db import get_db
-from .models_schemas import User, Admin, AdminRole
+from db import get_db
+from models_schemas import User, Admin, AdminRole
 
 # Configure Logger
 logger = logging.getLogger("app.core")
@@ -127,7 +127,7 @@ class JWTBearer(HTTPBearer):
     def __init__(self, auto_error: bool = True):
         super(JWTBearer, self).__init__(auto_error=auto_error)
 
-    async def __call__(self, request) -> Optional[HTTPAuthorizationCredentials]:
+    async def __call__(self, request: Request) -> Optional[HTTPAuthorizationCredentials]:
         credentials = await super(JWTBearer, self).__call__(request)
         if credentials:
             if credentials.scheme != "Bearer":
