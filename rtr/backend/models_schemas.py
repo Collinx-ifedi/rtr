@@ -25,7 +25,8 @@ from pydantic import (
     EmailStr, 
     Field, 
     ConfigDict, 
-    model_validator
+    model_validator,
+    computed_field
 )
 
 # ======================================================
@@ -104,8 +105,6 @@ class Admin(Base, TimestampMixin):
     role = Column(SQLEnum(AdminRole), default=AdminRole.ADMIN, nullable=False)
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime, nullable=True)
-
-    logs = relationship("ActivityLog", back_populates="admin")
 
 class User(Base, TimestampMixin):
     __tablename__ = "users"
@@ -298,19 +297,8 @@ class Banner(Base, TimestampMixin):
     title = Column(String(255), nullable=True)
     target_url = Column(Text, nullable=True)
     
+    display_order = Column(Integer, default=0, index=True)
     is_active = Column(Boolean, default=True)
-
-class ActivityLog(Base):
-    __tablename__ = "activity_logs"
-
-    id = Column(Integer, primary_key=True)
-    admin_id = Column(Integer, ForeignKey("admins.id"))
-    action = Column(Text, nullable=False)
-    target = Column(String(255)) 
-    ip_address = Column(String(50))
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    admin = relationship("Admin", back_populates="logs")
 
 # ======================================================
 # PYDANTIC SCHEMAS (V2)
@@ -385,6 +373,15 @@ class ProductSchema(ORMBase):
     
     is_available: bool = True
 
+    @computed_field
+    @property
+    def optimized_url(self) -> Optional[str]:
+        """Automatically injects Cloudinary auto-optimization params if hosted on Cloudinary."""
+        if self.image_url and "res.cloudinary.com" in self.image_url and "/upload/" in self.image_url:
+            parts = self.image_url.split("/upload/")
+            return f"{parts[0]}/upload/f_auto,q_auto/{parts[1]}"
+        return self.image_url
+
     @model_validator(mode='before')
     @classmethod
     def compute_availability(cls, data: Any):
@@ -441,6 +438,7 @@ class BannerCreateSchema(BaseModel):
     section_type: BannerType = BannerType.HERO
     title: Optional[str] = None
     target_url: Optional[str] = None
+    display_order: int = 0
     is_active: bool = True
 
 class BannerUpdateSchema(BannerCreateSchema):
@@ -451,4 +449,8 @@ class BannerSchema(ORMBase):
     section_type: BannerType
     title: Optional[str]
     target_url: Optional[str]
+    display_order: int
     is_active: bool
+
+# Alias to resolve import errors in main.py or legacy routers
+PhysicalOrderCreate = CheckoutRequest

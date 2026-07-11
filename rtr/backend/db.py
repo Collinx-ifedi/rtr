@@ -2,7 +2,7 @@
 # Production-level Database Engine & Utilities
 # - Asynchronous PostgreSQL (asyncpg)
 # - High-concurrency connection pooling
-# - FastAPI Dependency Injection
+# - FastAPI Dependency Injection with automatic resource management
 
 import os
 import logging
@@ -32,11 +32,12 @@ logger = logging.getLogger("app.db")
 raw_db_url = os.getenv("DATABASE_URL", "")
 
 if not raw_db_url:
-    raise RuntimeError("CRITICAL: DATABASE_URL is missing! System cannot start.")
+    logger.critical("CRITICAL: DATABASE_URL is missing! The application cannot initialize the persistence layer.")
+    raise RuntimeError("DATABASE_URL is not set.")
 
-# Production Protocol Fix
-# Cloud providers (Heroku/Render/AWS) often provide 'postgres://' 
-# but SQLAlchemy Async requires the 'postgresql+asyncpg://' driver.
+# Production Protocol Fix:
+# Cloud providers often provide 'postgres://' but SQLAlchemy Async requires 
+# the 'postgresql+asyncpg://' driver for non-blocking I/O.
 if raw_db_url.startswith("postgres://"):
     DATABASE_URL = raw_db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif raw_db_url.startswith("postgresql://"):
@@ -48,75 +49,69 @@ else:
 # 2. ASYNC ENGINE & CONNECTION POOL
 # ======================================================
 
-# High-Performance Connection Pool Tuned for FastAPI
+# High-Performance Connection Pool Tuned for Cloud Platforms:
+# pool_size: The number of connections to keep open in the pool.
+# max_overflow: The number of connections to allow beyond pool_size during traffic spikes.
 engine: AsyncEngine = create_async_engine(
     DATABASE_URL,
-    echo=False,             # Set to False in production to prevent query log flooding
-    future=True,
-    pool_size=20,           # Hold 20 permanent connections
-    max_overflow=40,        # Allow 40 temporary spikes (total 60 concurrent connections)
-    pool_timeout=60,        # Wait 60s for a connection to free up before failing
-    pool_pre_ping=True,     # Ping DB to ensure connection is alive before handing it out
-    pool_recycle=1800,      # Recycle connections every 30 mins to prevent stale drops
+    echo=False,  # Set to True only for local debugging; logs every SQL query
+    pool_size=10, 
+    max_overflow=20,
+    pool_timeout=30,
+    pool_pre_ping=True,  # Automatically detects and replaces stale connections
 )
-
-# ======================================================
-# 3. SESSION FACTORY
-# ======================================================
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    autoflush=False,
     expire_on_commit=False,
 )
 
 # ======================================================
-# 4. FASTAPI DEPENDENCY
+# 3. FASTAPI DEPENDENCY INJECTION
 # ======================================================
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency: Provides an async database session per request.
-    Automatically handles commit/rollback and cleanup.
+    The 'async with' context manager ensures the session is cleaned up,
+    rolled back on error, and returned to the connection pool automatically.
     """
     async with AsyncSessionLocal() as session:
         try:
             yield session
             # Note: Explicit commits are handled within the service layer 
-            # to ensure business logic validates before saving.
+            # to ensure business logic validates successfully before saving.
         except Exception as e:
             logger.error(f"Database session rolled back due to error: {str(e)}")
             await session.rollback()
             raise
-        finally:
-            await session.close()
+        # The 'finally' close block is implicitly handled by the context manager.
 
 # ======================================================
-# 5. INITIALIZATION & HEALTH CHECKS
+# 4. INITIALIZATION & HEALTH CHECKS
 # ======================================================
 
 async def init_db() -> None:
     """
-    Creates tables if they don't exist based on models_schemas.py.
-    For strict production environments, replace this with Alembic migrations.
+    Creates tables based on models_schemas.py definitions.
+    For production, use Alembic for schema migrations instead.
     """
     try:
         async with engine.begin() as conn:
-            # await conn.run_sync(Base.metadata.drop_all) # UNCOMMENT TO WIPE DB (Dev Only)
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables verified and initialized successfully.")
+        logger.info("Database schema initialized successfully.")
     except Exception as e:
-        logger.critical(f"Failed to initialize database schema: {str(e)}")
+        logger.critical(f"Database schema initialization failed: {str(e)}")
         raise
 
 async def ping_db() -> bool:
     """
-    Health check function to verify database responsiveness.
+    Health check function for monitoring. Verifies connectivity to the DB.
     """
     try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error(f"Database health check failed: {str(e)}")

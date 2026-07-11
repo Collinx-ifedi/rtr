@@ -1,23 +1,14 @@
 # main.py
-# Production-level Entry Point
-# Rocky Trendy Realities — Physical Furniture & AI Customization
-# - Integrated Cloudinary for Image Persistence (via CLOUDINARY_URL)
-# - AI Design Customization integration via OpenAI
-# - Multipart Form Data support for Admin CRUD (Physical Products)
-# - Robust Path Resolution for Docker/Render
-# - OTP Recovery Endpoint
-# - Automatic Background Cleanup of Unverified Users
-# - Flexible Blog Creation (Server-side Defaults)
-# - Messaging & User Moderation APIs
+# Production-level FastAPI Entry Point
+# Rocky Trendy Realities — Pure E-Commerce & AI Customization
 
 import os
-import shutil
-import uuid
 import time
-import logging
+import shutil
 import asyncio
-from datetime import datetime, timedelta
+import logging
 from pathlib import Path
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -33,27 +24,24 @@ from fastapi import (
     UploadFile,
     File,
     Form,
-    Query,
-    Body,
-    Response
+    Body
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, delete, func, case, update, or_
+from sqlalchemy import select, desc, delete, or_
 from sqlalchemy.orm import selectinload
 
 # --- LOCAL MODULES ---
-from .db import get_db, init_db
+from .db import get_db, init_db, ping_db
 from .core import (
     settings, 
     get_current_admin, 
     get_current_user,
     verify_password,
-    create_access_token, 
-    require_superadmin
+    create_access_token
 )
 from .utils import logger
 
@@ -67,9 +55,6 @@ from .services import (
     create_order_service,
     create_banner_service,
     process_admin_order_action,
-    send_user_message_service,
-    get_user_inbox_service,
-    mark_inbox_message_read_service,
     moderate_user_service
 )
 from .ai_services import get_ai_service, AIService
@@ -78,7 +63,8 @@ from .ai_services import get_ai_service, AIService
 from .models_schemas import (
     UserCreateSchema, 
     AdminLoginSchema, 
-    PhysicalOrderCreate, 
+    CheckoutRequest,
+    PhysicalOrderCreate,
     Admin,
     User,
     UserResponse,
@@ -87,25 +73,15 @@ from .models_schemas import (
     ProductSchema,
     Banner,
     BannerSchema,
+    BannerCreateSchema,
     Order,
     OrderResponse,
     OrderStatus,
-    PaymentMethod,
-    ProductCategory, 
-    # --- BLOG SYSTEM MODELS & SCHEMAS ---
-    BlogPost,
-    BlogComment,
-    BlogReaction, 
-    BlogResponse,
-    BlogDetailResponse,
-    CommentCreate,
-    # --- MESSAGING SCHEMAS ---
-    InboxMessageCreate,
-    InboxMessageResponse
+    ProductCategory
 )
 
 # =========================================================
-# 1. SETUP & CONFIGURATION
+# 1. SETUP & PATH RESOLUTION
 # =========================================================
 
 BASE_DIR = Path(__file__).resolve().parent      
@@ -116,23 +92,22 @@ UPLOAD_DIR = BASE_DIR / "temp_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 if not FRONTEND_DIR.exists():
-    logger.critical(f"CRITICAL: Frontend directory not found at {FRONTEND_DIR}")
+    logger.warning(f"Frontend directory not detected at {FRONTEND_DIR}. Static serving will be disabled.")
 
 # --- CLOUDINARY CONFIGURATION ---
 cloudinary_url = os.getenv("CLOUDINARY_URL")
-
 if cloudinary_url:
     cloudinary.config(cloudinary_url=cloudinary_url, secure=True)
-    logger.info("Cloudinary initialized successfully via CLOUDINARY_URL.")
+    logger.info("Cloudinary media engine initialized successfully.")
 else:
-    logger.critical("WARNING: CLOUDINARY_URL not found in environment variables. Media uploads will fail.")
-
+    logger.critical("CRITICAL: CLOUDINARY_URL missing from environment. Image uploads will fail.")
 
 # =========================================================
 # 2. LIFESPAN MANAGEMENT & BACKGROUND TASKS
 # =========================================================
 
 async def cleanup_unverified_users():
+    """Background garbage collector: Prunes abandoned unverified accounts older than 24 hours."""
     while True:
         try:
             async for db in get_db():
@@ -145,57 +120,67 @@ async def cleanup_unverified_users():
                 result = await db.execute(stmt)
                 await db.commit()
                 if result.rowcount > 0:
-                    logger.info(f"Cleanup: Removed {result.rowcount} unverified/abandoned accounts.")
+                    logger.info(f"Garbage Collector: Pruned {result.rowcount} unverified account(s).")
                 break 
         except Exception as e:
-            logger.error(f"Cleanup task error: {e}")
-        await asyncio.sleep(3600)
+            logger.error(f"Background cleanup task exception: {e}")
+        await asyncio.sleep(3600)  # Run hourly
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Rocky Trendy Realities startup initiated...")
+    logger.info("Rocky Trendy Realities system startup initiated...")
+    
+    # Initialize DB Schema and verify connectivity
     await init_db()
+    is_db_up = await ping_db()
+    if not is_db_up:
+        logger.critical("Database connectivity check failed during startup.")
+    
+    # Seed administrative accounts
     async for db in get_db():
         await bootstrap_admins(db)
         break 
+        
+    # Launch background worker
     cleanup_task = asyncio.create_task(cleanup_unverified_users())
-    logger.info("Background task started: Cleanup unverified users.")
-    logger.info(f"System startup complete. Version: {app.version}")
+    logger.info("Background cleanup worker initialized.")
+    logger.info(f"System startup complete. Serving API v{app.version}")
+    
     yield
-    logger.info("System shutting down...")
+    
+    logger.info("System shutdown sequence initiated...")
     cleanup_task.cancel()
     try:
         await cleanup_task
     except asyncio.CancelledError:
-        logger.info("Background cleanup task cancelled.")
+        logger.info("Background cleanup worker cleanly terminated.")
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
-
+    logger.info("Shutdown complete.")
 
 # =========================================================
 # 3. APPLICATION FACTORY
 # =========================================================
 
 app = FastAPI(
-    title="Rocky Trendy Realities Backend",
-    version="1.0.0", 
-    docs_url="/docs",
-    redoc_url="/redoc",
+    title="Rocky Trendy Realities E-Commerce API",
+    version="2.0.0", 
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
 )
 
-
 # =========================================================
-# 4. MIDDLEWARE
+# 4. MIDDLEWARE & GLOBAL HANDLERS
 # =========================================================
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-origins = ["*"] 
-if settings.ADMIN_FRONTEND_URL:
-    origins.append(settings.ADMIN_FRONTEND_URL)
-if settings.FRONTEND_URL:
+origins = ["http://localhost:3000", "http://localhost:8000"]
+if hasattr(settings, 'FRONTEND_URL') and settings.FRONTEND_URL:
     origins.append(settings.FRONTEND_URL)
+if hasattr(settings, 'ADMIN_FRONTEND_URL') and settings.ADMIN_FRONTEND_URL:
+    origins.append(settings.ADMIN_FRONTEND_URL)
 
 app.add_middleware(
     CORSMiddleware,
@@ -210,16 +195,23 @@ async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = f"{process_time:.4f}"
+    response.headers["X-Process-Time"] = f"{process_time:.4f}s"
     return response
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled system exception on {request.method} {request.url.path}: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "An internal server error occurred. Our engineering team has been notified."}
+    )
 
 # =========================================================
 # 5. API ROUTERS
 # =========================================================
 
 # --- A. AI CUSTOMIZATION ROUTER ---
-ai_router = APIRouter(prefix="/api/ai", tags=["AI Generation"])
+ai_router = APIRouter(prefix="/api/ai", tags=["AI Design Studio"])
 
 @ai_router.post("/generate-customization")
 async def generate_design_customization(
@@ -228,10 +220,7 @@ async def generate_design_customization(
     user: User = Depends(get_current_user),
     ai_service: AIService = Depends(get_ai_service)
 ):
-    """
-    Accepts user prompts for custom furniture alterations and streams
-    the resulting high-res rendering directly to Cloudinary.
-    """
+    """Generates a custom furniture rendering via AI and streams it directly to Cloudinary."""
     try:
         secure_url = await ai_service.generate_custom_furniture_image(
             prompt=prompt,
@@ -243,11 +232,11 @@ async def generate_design_customization(
         raise he
     except Exception as e:
         logger.error(f"AI Generation route failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process custom design.")
+        raise HTTPException(status_code=500, detail="Failed to synthesize custom design rendering.")
 
 
 # --- B. CATALOG ROUTER ---
-catalog_router = APIRouter(prefix="/api", tags=["Catalog"])
+catalog_router = APIRouter(prefix="/api", tags=["Product Catalog"])
 
 @catalog_router.get("/products", response_model=List[ProductSchema])
 async def get_products(
@@ -255,10 +244,8 @@ async def get_products(
     limit: int = 50, 
     db: AsyncSession = Depends(get_db)
 ):
-    query = select(Product).where(
-        or_(Product.is_deleted == False, Product.is_deleted.is_(None))
-    )
-    if category:
+    query = select(Product).where(or_(Product.is_deleted == False, Product.is_deleted.is_(None)))
+    if category and category != "all":
         query = query.where(Product.product_category == category)
     
     query = query.order_by(desc(Product.id)).limit(limit)
@@ -267,11 +254,11 @@ async def get_products(
 
 @catalog_router.get("/products/{product_id}", response_model=ProductSchema)
 async def get_product_detail(product_id: int, db: AsyncSession = Depends(get_db)):
-    stmt = select(Product).where(Product.id == product_id)
+    stmt = select(Product).where(Product.id == product_id).where(or_(Product.is_deleted == False, Product.is_deleted.is_(None)))
     result = await db.execute(stmt)
     product = result.scalar_one_or_none()
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Requested product not found or is no longer available.")
     return product
 
 @catalog_router.get("/banners", response_model=List[BannerSchema])
@@ -284,30 +271,26 @@ async def get_banners(active: bool = True, db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-# --- C. AUTH ROUTER ---
-auth_router = APIRouter(prefix="/api/auth", tags=["Auth"])
+# --- C. AUTHENTICATION ROUTER ---
+auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @auth_router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register_user(data: UserCreateSchema, db: AsyncSession = Depends(get_db)):
-    try:
-        user = await create_user_service(db, data.email, data.password, data.country)
-        time_since_creation = (datetime.utcnow() - user.created_at).total_seconds()
-        is_existing_resend = time_since_creation > 10
+    user = await create_user_service(db, data.email, data.password, data.country)
+    time_since_creation = (datetime.utcnow() - user.created_at).total_seconds()
+    is_existing_resend = time_since_creation > 10
 
-        response_payload = {
-            "pending_verification": True,
-            "user_email": user.email
-        }
+    response_payload = {
+        "pending_verification": True,
+        "user_email": user.email
+    }
 
-        if is_existing_resend:
-            response_payload["message"] = "Verification code resent"
-            return JSONResponse(status_code=status.HTTP_200_OK, content=response_payload)
-        else:
-            response_payload["message"] = "Account created. Check email for OTP."
-            return response_payload
-
-    except HTTPException as he:
-        raise he
+    if is_existing_resend:
+        response_payload["message"] = "Verification code has been resent to your email."
+        return JSONResponse(status_code=status.HTTP_200_OK, content=response_payload)
+    else:
+        response_payload["message"] = "Account created successfully. Please check your email for the verification code."
+        return response_payload
 
 @auth_router.post("/login")
 async def login_user(data: AdminLoginSchema, db: AsyncSession = Depends(get_db)):
@@ -315,15 +298,15 @@ async def login_user(data: AdminLoginSchema, db: AsyncSession = Depends(get_db))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid email address or password.")
     
     if not user.is_verified:
-        raise HTTPException(status_code=403, detail="Email not verified")
+        raise HTTPException(status_code=403, detail="Your email address has not been verified. Please verify your account to proceed.")
 
     if user.is_banned:
-        raise HTTPException(status_code=403, detail="Account suspended")
+        raise HTTPException(status_code=403, detail="Your account has been suspended. Please contact customer support.")
 
-    access_token = create_access_token(subject=user.id, role="user")
+    access_token = create_access_token({"sub": user.email, "type": "access", "role": "user"})
 
     return {
         "access_token": access_token,
@@ -335,52 +318,28 @@ async def login_user(data: AdminLoginSchema, db: AsyncSession = Depends(get_db))
         }
     }
 
-@auth_router.get("/me")
+@auth_router.get("/me", response_model=UserResponse)
 async def get_my_profile(user: User = Depends(get_current_user)):
-    return {
-        "email": user.email,
-        "full_name": user.full_name,
-        "country": user.country,
-        "avatar_url": user.avatar_url
-    }
+    return user
 
 @auth_router.post("/verify-email")
-async def verify_email(payload: dict, db: AsyncSession = Depends(get_db)):
+async def verify_email(payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     email = payload.get("email")
     otp = payload.get("otp")
+    if not email or not otp:
+        raise HTTPException(status_code=400, detail="Both email and OTP code are required.")
     return await verify_user_email_service(db, email, otp)
 
 @auth_router.post("/resend-otp")
-async def resend_otp(payload: dict, db: AsyncSession = Depends(get_db)):
+async def resend_otp(payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     email = payload.get("email")
     if not email:
-        raise HTTPException(status_code=400, detail="Email required")
+        raise HTTPException(status_code=400, detail="Email address is required.")
     return await resend_otp_service(db, email)
 
 
-# --- D. INBOX & USER ROUTER ---
-user_router = APIRouter(prefix="/api/user", tags=["User Profile"])
-inbox_router = APIRouter(prefix="/api/inbox", tags=["Inbox"])
-
-@user_router.get("/profile", response_model=UserResponse)
-async def get_user_profile(user: User = Depends(get_current_user)):
-    return user
-
-@inbox_router.get("", response_model=List[InboxMessageResponse])
-async def get_my_inbox(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    return await get_user_inbox_service(db, user.id)
-
-@inbox_router.post("/{message_id}/read")
-async def mark_message_as_read(
-    message_id: int,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    return await mark_inbox_message_read_service(db, message_id, user.id)
-
-
-# --- E. ORDER ROUTER ---
-order_router = APIRouter(prefix="/api/orders", tags=["Orders"])
+# --- D. ORDER & CHECKOUT ROUTER ---
+order_router = APIRouter(prefix="/api/orders", tags=["Orders & Checkout"])
 
 @order_router.post("/checkout", status_code=status.HTTP_201_CREATED)
 async def checkout_route(
@@ -391,26 +350,33 @@ async def checkout_route(
     try:
         checkout_url = await create_order_service(db, user.id, order_data)
         return {"checkout_url": checkout_url}
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        logger.error(f"Checkout failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Checkout initialization failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initialize checkout gateway.")
 
-@order_router.get("")
+@order_router.get("", response_model=List[OrderResponse])
 async def get_user_orders(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    stmt = select(Order).where(Order.user_id == user.id).order_by(desc(Order.created_at))
+    stmt = (
+        select(Order)
+        .where(Order.user_id == user.id)
+        .options(selectinload(Order.items))
+        .order_by(desc(Order.created_at))
+    )
     result = await db.execute(stmt)
     return result.scalars().all()
 
 
-# --- F. ADMIN ROUTER ---
-admin_router = APIRouter(prefix="/api/admin", tags=["Admin"])
+# --- E. ADMINISTRATIVE ROUTER ---
+admin_router = APIRouter(prefix="/api/admin", tags=["Store Administration"])
 
 @admin_router.post("/login")
 async def admin_login_route(data: AdminLoginSchema, db: AsyncSession = Depends(get_db)):
     token = await admin_login_service(db, data.username, data.password)
     result = await db.execute(select(Admin).where(Admin.username == data.username))
     admin = result.scalar_one_or_none()
-    role = admin.role.value if admin and hasattr(admin.role, 'value') else "admin"
+    role = admin.role.value if admin and hasattr(admin.role, 'value') else str(admin.role)
     
     return {
         "access_token": token, 
@@ -424,7 +390,7 @@ async def admin_login_route(data: AdminLoginSchema, db: AsyncSession = Depends(g
 @admin_router.get("/stats")
 async def get_admin_stats(db: AsyncSession = Depends(get_db), admin: Admin = Depends(get_current_admin)):
     revenue_query = select(func.sum(Order.total_amount)).where(
-        Order.status.in_([OrderStatus.PAID, OrderStatus.COMPLETED])
+        Order.status.in_([OrderStatus.PAID, OrderStatus.PROCESSING, OrderStatus.SHIPPED, OrderStatus.DELIVERED])
     )
     total_revenue = (await db.execute(revenue_query)).scalar() or 0.0
 
@@ -432,7 +398,7 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db), admin: Admin = Dep
     total_users = (await db.execute(select(func.count(User.id)))).scalar() or 0
 
     open_orders = (await db.execute(
-        select(func.count(Order.id)).where(Order.status == OrderStatus.IN_PROGRESS)
+        select(func.count(Order.id)).where(Order.status.in_([OrderStatus.PAID, OrderStatus.PROCESSING]))
     )).scalar() or 0
 
     return {
@@ -466,21 +432,17 @@ async def unban_user_route(user_id: int, db: AsyncSession = Depends(get_db), adm
 
 @admin_router.get("/orders", response_model=List[OrderResponse])
 async def get_admin_orders(limit: int = 50, db: AsyncSession = Depends(get_db), admin: Admin = Depends(get_current_admin)):
-    try:
-        query = (
-            select(Order)
-            .options(
-                selectinload(Order.user),
-                selectinload(Order.items).selectinload(OrderItem.product)
-            )
-            .order_by(desc(Order.created_at))
-            .limit(limit)
+    query = (
+        select(Order)
+        .options(
+            selectinload(Order.user),
+            selectinload(Order.items)
         )
-        result = await db.execute(query)
-        return result.scalars().all()
-    except Exception as e:
-        logger.error(f"Order Fetch Error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Database error while fetching orders.")
+        .order_by(desc(Order.created_at))
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    return result.scalars().all()
 
 @admin_router.post("/orders/{order_id}/action")
 async def admin_order_action(
@@ -491,22 +453,21 @@ async def admin_order_action(
 ):
     action = payload.get("action")
     manual_content = payload.get("manual_content")
-    if action not in ["complete", "reject", "ship"]:
-        raise HTTPException(status_code=400, detail="Invalid action")
+    if action not in ["complete", "deliver", "reject", "cancel", "ship"]:
+        raise HTTPException(status_code=400, detail="Invalid fulfillment action specified.")
     return await process_admin_order_action(db, order_id, action, manual_content)
 
-# -- PRODUCT CRUD --
 @admin_router.get("/products", response_model=List[ProductSchema])
 async def get_admin_products(db: AsyncSession = Depends(get_db), admin: Admin = Depends(get_current_admin)):
     query = select(Product).where(or_(Product.is_deleted == False, Product.is_deleted.is_(None))).order_by(desc(Product.id))
     result = await db.execute(query)
     return result.scalars().all()
 
-@admin_router.post("/products", response_model=ProductSchema)
+@admin_router.post("/products", response_model=ProductSchema, status_code=status.HTTP_201_CREATED)
 async def create_product(
     name: str = Form(...),
     price: float = Form(...),
-    stock_quantity: int = Form(...),
+    quantity: int = Form(...),
     product_category: ProductCategory = Form(...),
     description: Optional[str] = Form(None),
     file: UploadFile = File(...),
@@ -518,12 +479,12 @@ async def create_product(
         upload_result = cloudinary.uploader.upload(file.file, folder="rtr_products")
         secure_url = upload_result.get("secure_url")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Image Provider Error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Image CDN Upload Error: {str(e)}")
 
     new_product = Product(
         name=name,
         price=price,
-        stock_quantity=stock_quantity,
+        quantity=quantity,
         product_category=product_category,
         description=description,
         image_url=secure_url,
@@ -539,7 +500,7 @@ async def update_product(
     product_id: int,
     name: str = Form(...),
     price: float = Form(...),
-    stock_quantity: int = Form(...),
+    quantity: int = Form(...),
     product_category: Optional[ProductCategory] = Form(None),
     description: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
@@ -551,18 +512,18 @@ async def update_product(
     product = result.scalar_one_or_none()
     
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Target product not found.")
 
     if file:
         try:
             upload_result = cloudinary.uploader.upload(file.file, folder="rtr_products")
             product.image_url = upload_result.get("secure_url")
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Image Update Error: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Image CDN Update Error: {str(e)}")
 
     product.name = name
     product.price = price
-    product.stock_quantity = stock_quantity
+    product.quantity = quantity
     product.description = description
     product.is_featured = is_featured
     if product_category:
@@ -572,20 +533,25 @@ async def update_product(
     await db.refresh(product)
     return product
 
+@admin_router.delete("/products/{product_id}")
+async def delete_product(product_id: int, db: AsyncSession = Depends(get_db), admin: Admin = Depends(get_current_admin)):
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    
+    product.is_deleted = True
+    product.deleted_at = datetime.utcnow()
+    await db.commit()
+    return {"status": "success", "detail": "Product removed from active catalog."}
 
-# --- G. BLOG ROUTER (Public) ---
-blog_router = APIRouter(prefix="/api/blog", tags=["Blog"])
-
-@blog_router.get("/posts", response_model=List[BlogResponse])
-async def get_blog_posts(db: AsyncSession = Depends(get_db)):
-    stmt = (
-        select(BlogPost)
-        .where(BlogPost.is_published == True, BlogPost.is_deleted == False)
-        .options(selectinload(BlogPost.author))
-        .order_by(desc(BlogPost.created_at))
-    )
-    result = await db.execute(stmt)
-    return result.scalars().all()
+@admin_router.post("/banners", response_model=BannerSchema, status_code=status.HTTP_201_CREATED)
+async def create_banner_route(
+    banner_data: BannerCreateSchema,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    return await create_banner_service(db, banner_data, admin.username)
 
 
 # =========================================================
@@ -595,35 +561,39 @@ async def get_blog_posts(db: AsyncSession = Depends(get_db)):
 app.include_router(ai_router)
 app.include_router(catalog_router)
 app.include_router(auth_router)
-app.include_router(user_router)    
-app.include_router(inbox_router)
 app.include_router(order_router)
 app.include_router(admin_router)
-app.include_router(blog_router)
 
 # =========================================================
-# 7. FRONTEND PAGE ROUTES
+# 7. FRONTEND STATIC & SPA ROUTING
 # =========================================================
 
 @app.get("/")
-async def serve_index(): return FileResponse(FRONTEND_DIR / "index.html")
+async def serve_index(): 
+    index_file = FRONTEND_DIR / "rocky-trendy-realities.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return JSONResponse(status_code=404, content={"detail": "Frontend storefront index not found."})
+
+@app.get("/admin")
+async def serve_admin_index(): 
+    admin_file = FRONTEND_DIR / "rtr-admin.html"
+    if admin_file.exists():
+        return FileResponse(admin_file)
+    return JSONResponse(status_code=404, content={"detail": "Admin portal index not found."})
 
 @app.get("/{page_name}.html")
 async def serve_html_pages(page_name: str):
     file_path = FRONTEND_DIR / f"{page_name}.html"
     if file_path.exists():
         return FileResponse(file_path)
-    return JSONResponse(status_code=404, content={"detail": "Page not found"})
-
-# =========================================================
-# 8. STATIC FILES
-# =========================================================
+    return JSONResponse(status_code=404, content={"detail": "Requested page not found."})
 
 if FRONTEND_DIR.exists():
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
 # =========================================================
-# EXECUTION
+# 8. LOCAL EXECUTION ENTRY POINT
 # =========================================================
 
 if __name__ == "__main__":
