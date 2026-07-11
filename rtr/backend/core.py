@@ -22,8 +22,8 @@ from sqlalchemy.future import select
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import ValidationError, Field
 
-from .db import get_db
-from .models_schemas import User, Admin, AdminRole
+from db import get_db
+from models_schemas import User, Admin, AdminRole
 
 # Configure Logger
 logger = logging.getLogger("app.core")
@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     ENV: str = Field(default="production")
     DEBUG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
+    
+    # Admin Seeding Strings
+    ADMIN_USERNAMES: Optional[str] = Field(default=None)
+    ADMIN_PASSWORDS: Optional[str] = Field(default=None)
     
     # Security Secrets
     SECRET_KEY: str = Field(...)
