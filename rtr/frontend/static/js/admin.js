@@ -978,7 +978,7 @@
       const fd = new FormData();
       fd.append('name', sanitizeInput($('#pm-name').value, 255));
       fd.append('price', Number($('#pm-price').value));
-      fd.append('stock_quantity', Number($('#pm-quantity').value || 0));
+      fd.append('quantity', Number($('#pm-quantity').value || 0));
       fd.append('product_category', $('#pm-cat').value);
       fd.append('description', sanitizeInput($('#pm-desc').value, 4000));
       fd.append('is_featured', $('#pm-featured')?.checked ? 'true' : 'false');
