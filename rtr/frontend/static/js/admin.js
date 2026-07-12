@@ -1486,8 +1486,7 @@
       const page = document.body.dataset.page || 'dashboard';
       Log.info('Initializing page:', page);
 
-      // Editor is always safe to init (only binds if modal exists)
-      ProductEditor.init();
+     
 
       const modules = PAGE_MODULES[page] || [];
       for (const mod of modules) {
