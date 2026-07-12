@@ -281,8 +281,8 @@
     orders: (params = {}) => APIClient.get(`/api/admin/orders${qs(params)}`),
     orderAction: (id, action, manual_content) => APIClient.post(`/api/admin/orders/${id}/action`, { action, manual_content }),
     products: () => APIClient.get('/api/admin/products'),
-    createProduct: (fd) => APIClient.upload('/api/admin/products', fd, 'POST'),
-    updateProduct: (id, fd) => APIClient.upload(`/api/admin/products/${id}`, fd, 'PUT'),
+    createProduct: (fd) => APIClient.upload('/api/admin/products', fd, 'POST',{retries:0}),
+    updateProduct: (id, fd) => APIClient.upload(`/api/admin/products/${id}`, fd, 'PUT',{retries:0}),
     banners: (active = true) => APIClient.get(`/api/banners?active=${active}`),
     publicProducts: (params = {}) => APIClient.get(`/api/products${qs(params)}`),
   };
