@@ -31,7 +31,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, delete, or_
+from sqlalchemy import select, desc, delete, or_, func
 from sqlalchemy.orm import selectinload
 
 # --- LOCAL MODULES ---
