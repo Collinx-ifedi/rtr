@@ -471,7 +471,10 @@ async def create_product(
     admin: Admin = Depends(get_current_admin)
 ):
     try:
-        upload_result = cloudinary.uploader.upload(file.file, folder="rtr_products")
+        # Offload synchronous Cloudinary API call to a background thread
+        upload_result = await asyncio.to_thread(
+            cloudinary.uploader.upload, file.file, folder="rtr_products"
+        )
         secure_url = upload_result.get("secure_url")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Image CDN Upload Error: {str(e)}")
@@ -511,7 +514,10 @@ async def update_product(
 
     if file:
         try:
-            upload_result = cloudinary.uploader.upload(file.file, folder="rtr_products")
+            # Offload synchronous Cloudinary API call to a background thread
+            upload_result = await asyncio.to_thread(
+                cloudinary.uploader.upload, file.file, folder="rtr_products"
+            )
             product.image_url = upload_result.get("secure_url")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Image CDN Update Error: {str(e)}")
