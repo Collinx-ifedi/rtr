@@ -90,6 +90,7 @@ class BannerType(str, Enum):
     HERO = "hero"
     ADVERT = "advert"
     LOGO = "logo"
+    FLOATING = "floating"  # <-- Added to natively support floating hero graphics
 
 # ======================================================
 # AUTH & USER MODELS
@@ -284,7 +285,7 @@ class Transaction(Base, TimestampMixin):
     order = relationship("Order", back_populates="transactions")
 
 # ======================================================
-# CMS MODELS (Hero, Advert, Logo)
+# CMS MODELS (Hero, Advert, Logo, Floating)
 # ======================================================
 
 class Banner(Base, TimestampMixin):
