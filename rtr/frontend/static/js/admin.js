@@ -1226,13 +1226,23 @@
      HERO BANNER + FLOATING IMAGE MODULE
      ============================================================== */
   const HeroModule = {
+    _file: null,        // staged hero background File, if any
+    _floatFiles: [],     // staged (unsaved) floating-image Files awaiting upload
+    _floatBanners: [],   // persisted floating banners fetched from the backend
     init() {
       this.bindPreview();
       this.bindUpload();
+      this.bindFloatingImages();
       on($('#hero-save'), 'click', () => this.save());
       on($('#banner-list'), 'click', (e) => {
         const delBtn = e.target.closest('[data-delete-banner]');
         if (delBtn) this.deleteBanner(delBtn.dataset.deleteBanner, delBtn);
+      });
+      on($('#float-img-list'), 'click', (e) => {
+        const removeDraft = e.target.closest('[data-remove-draft]');
+        if (removeDraft) { this._floatFiles.splice(Number(removeDraft.dataset.removeDraft), 1); this.renderFloatingImages(); return; }
+        const delFloat = e.target.closest('[data-delete-float]');
+        if (delFloat) this.deleteBanner(delFloat.dataset.deleteFloat, delFloat);
       });
       this.loadBanners();
     },
@@ -1243,12 +1253,25 @@
         on(input, 'input', () => { const d = document.getElementById(dest); if (d) d.textContent = sanitizeInput(input.value, 200); });
       });
     },
+    /* ---- Hero upload zone visual state ---------------------------- */
+    _setUploadZoneState(active, label) {
+      const zone = $('#hero-upload-zone'); if (!zone) return;
+      const icon = $('.uz-icon i', zone);
+      const text = $('p', zone);
+      zone.classList.toggle('has-file', active);
+      zone.style.borderColor = active ? 'var(--accent, #C4956A)' : '';
+      zone.style.background = active ? 'rgba(196,149,106,.08)' : '';
+      if (icon) icon.setAttribute('data-lucide', active ? 'check-circle' : 'image-plus');
+      if (text) text.textContent = active ? label : 'Click or drop a hero background';
+      refreshIcons();
+    },
     bindUpload() {
       const input = $('#hero-bg-input');
       on(input, 'change', (e) => {
         const f = e.target.files[0]; if (!f) return;
         const img = $('#hero-bg-preview'); if (img) img.src = URL.createObjectURL(f);
         this._file = f;
+        this._setUploadZoneState(true, `Selected: ${f.name}`);
       });
       on($('#hero-bg-url-apply'), 'click', () => {
         const url = safeURL($('#hero-bg-url')?.value);
@@ -1257,26 +1280,112 @@
         this._file = null; // an explicitly applied URL takes precedence over a previously picked file
       });
     },
+    /* ---- Floating images: staging + persistence -------------------- */
+    bindFloatingImages() {
+      const trigger = $('#add-float-img');
+      const input = $('#float-img-input');
+      on(trigger, 'click', () => input && input.click());
+      on(input, 'change', (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        this._floatFiles.push(...files);
+        this.renderFloatingImages();
+        input.value = ''; // allow re-selecting the same file(s) later
+      });
+      on($('#save-float-img'), 'click', () => this.saveFloatingImages());
+    },
+    renderFloatingImages() {
+      const wrap = $('#float-img-list'); if (!wrap) return;
+      clear(wrap);
+      if (!this._floatFiles.length && !this._floatBanners.length) {
+        wrap.innerHTML = UI.empty('image-plus', 'No floating images', 'Add images to display them floating around the hero.');
+        refreshIcons(); return;
+      }
+      this._floatFiles.forEach((f, i) => {
+        f.__previewUrl = f.__previewUrl || URL.createObjectURL(f);
+        const item = el('div', { class: 'float-img-item' });
+        item.innerHTML = `
+          <img src="${f.__previewUrl}" alt="${escapeHTML(f.name)}"/>
+          <span class="badge no-dot draft">Unsaved Draft</span>
+          <div class="fi-actions"><button class="icon-btn danger tooltip" data-tip="Remove" type="button" data-remove-draft="${i}"><i data-lucide="trash-2"></i></button></div>`;
+        wrap.appendChild(item);
+      });
+      this._floatBanners.forEach((b) => {
+        const item = el('div', { class: 'float-img-item' });
+        item.innerHTML = `
+          <img loading="lazy" src="${safeURL(b.image_url) || ''}" alt="${escapeHTML(b.title || 'Floating image')}" onerror="this.style.visibility='hidden'"/>
+          <div class="fi-actions"><button class="icon-btn danger tooltip" data-tip="Delete" type="button" data-delete-float="${b.id}"><i data-lucide="trash-2"></i></button></div>`;
+        wrap.appendChild(item);
+      });
+      refreshIcons();
+    },
+    async saveFloatingImages() {
+      if (!this._floatFiles.length) { Notify.warning('Add at least one image before saving'); return; }
+      const btn = $('#save-float-img'); const orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Saving…';
+
+      const remaining = [];
+      let successCount = 0, failCount = 0;
+      for (const f of this._floatFiles) {
+        try {
+          const fd = new FormData();
+          fd.append('file', f);
+          fd.append('section_type', 'floating');
+          fd.append('title', f.name);
+          fd.append('is_active', 'true');
+          await API.createBanner(fd);
+          successCount++;
+        } catch (e) {
+          Log.error('save floating image', f.name, e);
+          failCount++;
+          remaining.push(f);
+        }
+      }
+      this._floatFiles = remaining;
+      btn.disabled = false; btn.innerHTML = orig;
+
+      if (successCount) {
+        Notify.success(`${successCount} floating image${successCount > 1 ? 's' : ''} saved`);
+        Store.invalidate('banners');
+        await this.loadBanners(); // also re-renders the floating list
+      } else {
+        this.renderFloatingImages();
+      }
+      if (failCount) Notify.error(`${failCount} image${failCount > 1 ? 's' : ''} failed to upload`);
+    },
+    /* ---- Load + render everything from the backend ----------------- */
     async loadBanners() {
       const wrap = $('#banner-list'); if (!wrap) return;
       try {
         const banners = await API.banners(false);
-        Store.set('banners', banners); clear(wrap);
-        if (!banners.length) { wrap.innerHTML = UI.empty('image', 'No banners yet', 'Upload a hero image to begin.'); refreshIcons(); return; }
-        banners.forEach((b) => {
-          const card = el('div', { class: 'banner-card' });
-          card.innerHTML = `
-            <img class="banner-thumb" loading="lazy" src="${safeURL(b.image_url) || ''}" alt="" onerror="this.style.visibility='hidden'"/>
-            <div class="flex-1">
-              <div class="td-strong">${escapeHTML(b.title || Fmt.titleCase(b.section_type))}</div>
-              <div class="fs-xs text-muted">${escapeHTML(b.section_type)}</div>
-            </div>
-            <span class="badge no-dot ${b.is_active ? 'active' : 'neutral'}">${b.is_active ? 'Active' : 'Hidden'}</span>
-            <button class="icon-btn danger tooltip" data-tip="Delete banner" type="button" data-delete-banner="${b.id}"><i data-lucide="trash-2"></i></button>`;
-          wrap.appendChild(card);
-        });
+        Store.set('banners', banners);
+
+        const heroBanners = banners.filter((b) => b.section_type !== 'floating');
+        this._floatBanners = banners.filter((b) => b.section_type === 'floating');
+
+        clear(wrap);
+        if (!heroBanners.length) { wrap.innerHTML = UI.empty('image', 'No banners yet', 'Upload a hero image to begin.'); }
+        else {
+          heroBanners.forEach((b) => {
+            const card = el('div', { class: 'banner-card' });
+            card.innerHTML = `
+              <img class="banner-thumb" loading="lazy" src="${safeURL(b.image_url) || ''}" alt="" onerror="this.style.visibility='hidden'"/>
+              <div class="flex-1">
+                <div class="td-strong">${escapeHTML(b.title || Fmt.titleCase(b.section_type))}</div>
+                <div class="fs-xs text-muted">${escapeHTML(b.section_type)}</div>
+              </div>
+              <span class="badge no-dot ${b.is_active ? 'active' : 'neutral'}">${b.is_active ? 'Active' : 'Hidden'}</span>
+              <button class="icon-btn danger tooltip" data-tip="Delete banner" type="button" data-delete-banner="${b.id}"><i data-lucide="trash-2"></i></button>`;
+            wrap.appendChild(card);
+          });
+        }
         refreshIcons();
-      } catch (e) { Log.warn('banners', e.message); wrap.innerHTML = UI.empty('image', 'Unable to load banners', ''); refreshIcons(); }
+        this.renderFloatingImages();
+      } catch (e) {
+        Log.warn('banners', e.message);
+        wrap.innerHTML = UI.empty('image', 'Unable to load banners', '');
+        refreshIcons();
+      }
     },
     async save() {
       const url = safeURL($('#hero-bg-url')?.value || '');
@@ -1302,6 +1411,8 @@
         // Banner schema, so it's retained as a local draft alongside the persisted banner.
         Storage.set('rtr_hero_draft', { h1: $('#hero-h1')?.value, h2: $('#hero-h2')?.value, sub: $('#hero-sub')?.value, cta: $('#hero-cta')?.value, eyebrow: $('#hero-eyebrow')?.value });
         this._file = null;
+        const input = $('#hero-bg-input'); if (input) input.value = '';
+        this._setUploadZoneState(false);
         Store.invalidate('banners');
         await this.loadBanners();
       } catch (e) {
@@ -1322,31 +1433,6 @@
         Notify.error(e.message || 'Failed to delete banner');
         if (btn) btn.disabled = false;
       }
-    },
-  };
-
-  const FloatingImageModule = {
-    init() {
-      this.list = $('#float-img-list'); if (!this.list) return;
-      this.items = Storage.get('rtr_float_imgs', []);
-      on($('#add-float-img'), 'click', () => this.add());
-      this.render();
-    },
-    add() {
-      const input = el('input', { type: 'file', accept: 'image/*' });
-      on(input, 'change', (e) => { const f = e.target.files[0]; if (!f) return; this.items.push(URL.createObjectURL(f)); this.render(); });
-      input.click();
-    },
-    render() {
-      clear(this.list);
-      if (!this.items.length) { this.list.innerHTML = UI.empty('image-plus', 'No floating images', ''); refreshIcons(); return; }
-      this.items.forEach((src, i) => {
-        const item = el('div', { class: 'float-img-item' });
-        item.innerHTML = `<img src="${escapeHTML(src)}" alt="floating image ${i + 1}"/><div class="fi-actions"><button class="icon-btn danger" data-remove="${i}" type="button"><i data-lucide="trash-2"></i></button></div>`;
-        on($('[data-remove]', item), 'click', () => { this.items.splice(i, 1); this.render(); });
-        this.list.appendChild(item);
-      });
-      refreshIcons();
     },
   };
 
@@ -1554,7 +1640,7 @@
   const PAGE_MODULES = {
     dashboard: [DashboardModule, AnalyticsModule, OrdersModule, CustomersModule],
     products: [ProductsModule, ProductEditor, OrdersModule, CustomersModule, InventoryModule],
-    content: [HeroModule, FloatingImageModule, EmailModule, CampaignModule],
+    content: [HeroModule, EmailModule, CampaignModule],
   };
 
   const App = {
