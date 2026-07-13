@@ -285,6 +285,8 @@
     updateProduct: (id, fd) => APIClient.upload(`/api/admin/products/${id}`, fd, 'PUT',{retries:0}),
     deleteProduct: (id) => APIClient.delete(`/api/admin/products/${id}`, { retries: 0 }),
     banners: (active = true) => APIClient.get(`/api/banners?active=${active}`),
+    createBanner: (fd) => APIClient.upload('/api/admin/banners', fd, 'POST', { retries: 0 }),
+    deleteBanner: (id) => APIClient.delete(`/api/admin/banners/${id}`, { retries: 0 }),
     publicProducts: (params = {}) => APIClient.get(`/api/products${qs(params)}`),
   };
   const qs = (params) => {
@@ -1225,6 +1227,10 @@
       this.bindPreview();
       this.bindUpload();
       on($('#hero-save'), 'click', () => this.save());
+      on($('#banner-list'), 'click', (e) => {
+        const delBtn = e.target.closest('[data-delete-banner]');
+        if (delBtn) this.deleteBanner(delBtn.dataset.deleteBanner, delBtn);
+      });
       this.loadBanners();
     },
     bindPreview() {
@@ -1236,8 +1242,17 @@
     },
     bindUpload() {
       const input = $('#hero-bg-input');
-      on(input, 'change', (e) => { const f = e.target.files[0]; if (!f) return; const img = $('#hero-bg-preview'); if (img) img.src = URL.createObjectURL(f); this._file = f; });
-      on($('#hero-bg-url-apply'), 'click', () => { const url = safeURL($('#hero-bg-url')?.value); if (!url) { Notify.warning('Enter a valid image URL'); return; } const img = $('#hero-bg-preview'); if (img) img.src = url; });
+      on(input, 'change', (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        const img = $('#hero-bg-preview'); if (img) img.src = URL.createObjectURL(f);
+        this._file = f;
+      });
+      on($('#hero-bg-url-apply'), 'click', () => {
+        const url = safeURL($('#hero-bg-url')?.value);
+        if (!url) { Notify.warning('Enter a valid image URL'); return; }
+        const img = $('#hero-bg-preview'); if (img) img.src = url;
+        this._file = null; // an explicitly applied URL takes precedence over a previously picked file
+      });
     },
     async loadBanners() {
       const wrap = $('#banner-list'); if (!wrap) return;
@@ -1247,17 +1262,63 @@
         if (!banners.length) { wrap.innerHTML = UI.empty('image', 'No banners yet', 'Upload a hero image to begin.'); refreshIcons(); return; }
         banners.forEach((b) => {
           const card = el('div', { class: 'banner-card' });
-          card.innerHTML = `<img class="banner-thumb" loading="lazy" src="${safeURL(b.image_url) || ''}" alt="" onerror="this.style.visibility='hidden'"/><div class="flex-1"><div class="td-strong">${escapeHTML(b.title || Fmt.titleCase(b.section_type))}</div><div class="fs-xs text-muted">${escapeHTML(b.section_type)}</div></div><span class="badge no-dot ${b.is_active ? 'active' : 'neutral'}">${b.is_active ? 'Active' : 'Hidden'}</span>`;
+          card.innerHTML = `
+            <img class="banner-thumb" loading="lazy" src="${safeURL(b.image_url) || ''}" alt="" onerror="this.style.visibility='hidden'"/>
+            <div class="flex-1">
+              <div class="td-strong">${escapeHTML(b.title || Fmt.titleCase(b.section_type))}</div>
+              <div class="fs-xs text-muted">${escapeHTML(b.section_type)}</div>
+            </div>
+            <span class="badge no-dot ${b.is_active ? 'active' : 'neutral'}">${b.is_active ? 'Active' : 'Hidden'}</span>
+            <button class="icon-btn danger tooltip" data-tip="Delete banner" type="button" data-delete-banner="${b.id}"><i data-lucide="trash-2"></i></button>`;
           wrap.appendChild(card);
         });
+        refreshIcons();
       } catch (e) { Log.warn('banners', e.message); wrap.innerHTML = UI.empty('image', 'Unable to load banners', ''); refreshIcons(); }
     },
-    save() {
-      // The backend banner-create endpoint is not publicly exposed in this build;
-      // persist a local draft and notify so admins retain their edits.
-      const draft = { h1: $('#hero-h1')?.value, h2: $('#hero-h2')?.value, sub: $('#hero-sub')?.value, cta: $('#hero-cta')?.value, eyebrow: $('#hero-eyebrow')?.value, bg: $('#hero-bg-preview')?.src };
-      Storage.set('rtr_hero_draft', draft);
-      Notify.success('Hero content saved');
+    async save() {
+      const url = safeURL($('#hero-bg-url')?.value || '');
+      if (!this._file && !url) { Notify.warning('Please upload a banner image or provide an image URL.'); return; }
+
+      const fd = new FormData();
+      // Image: a physical file takes priority over a pasted URL.
+      if (this._file) fd.append('file', this._file);
+      else fd.append('image_url', url);
+
+      fd.append('title', sanitizeInput($('#hero-h1')?.value, 255));
+      fd.append('section_type', 'hero');
+      fd.append('target_url', sanitizeInput($('#hero-target-url')?.value, 500));
+      fd.append('display_order', String(Number($('#hero-display-order')?.value || 0)));
+      fd.append('is_active', $('#hero-is-active') ? ($('#hero-is-active').checked ? 'true' : 'false') : 'true');
+
+      const btn = $('#hero-save'); const orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Saving…';
+      try {
+        await API.createBanner(fd);
+        Notify.success('Banner saved');
+        // Presentational hero copy (eyebrow / sub / CTA label) isn't part of the
+        // Banner schema, so it's retained as a local draft alongside the persisted banner.
+        Storage.set('rtr_hero_draft', { h1: $('#hero-h1')?.value, h2: $('#hero-h2')?.value, sub: $('#hero-sub')?.value, cta: $('#hero-cta')?.value, eyebrow: $('#hero-eyebrow')?.value });
+        this._file = null;
+        Store.invalidate('banners');
+        await this.loadBanners();
+      } catch (e) {
+        Log.error('save banner', e);
+        Notify.error(e.message || 'Failed to save banner');
+      } finally { btn.disabled = false; btn.innerHTML = orig; }
+    },
+    async deleteBanner(id, btn) {
+      if (!confirm('Delete this banner? This action cannot be undone.')) return;
+      if (btn) btn.disabled = true;
+      try {
+        await API.deleteBanner(id);
+        Notify.success('Banner deleted');
+        Store.invalidate('banners');
+        await this.loadBanners();
+      } catch (e) {
+        Log.error('delete banner', e);
+        Notify.error(e.message || 'Failed to delete banner');
+        if (btn) btn.disabled = false;
+      }
     },
   };
 
