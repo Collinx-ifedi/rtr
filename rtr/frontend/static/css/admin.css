@@ -341,6 +341,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.25; color: var(--cream
   font-weight: 600; font-size: 0.82rem; letter-spacing: 0.02em;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
   white-space: nowrap;
+  flex-shrink: 0;
   transition: transform var(--t-fast), background var(--t-fast), opacity var(--t-fast), border-color var(--t-fast);
 }
 .btn:active { transform: translateY(1px) scale(0.99); }
@@ -711,7 +712,7 @@ table tbody tr:hover td { background: rgba(196, 149, 106, 0.04); }
 /* ================================================================
    19. DRAWERS
    ================================================================ */
-.drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: var(--z-drawer); display: none; backdrop-filter: blur(3px); }
+.drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: var(--z-drawer); display: none; backdrop-filter: blur(1px); }
 .drawer-bg.on { display: block; animation: fadeIn var(--t-base) ease; }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: 420px; max-width: 92vw;
@@ -1031,6 +1032,7 @@ table tbody tr:hover td { background: rgba(196, 149, 106, 0.04); }
   .modal-foot { flex-direction: column-reverse; }
   .modal-foot .btn { width: 100%; }
   .hide-mobile { display: none !important; }
+  .section-head { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
 }
 @media (max-width: 560px) {
   .stat-row, .stat-grid-6 { grid-template-columns: 1fr 1fr; }
