@@ -130,15 +130,26 @@
                 </div>
               </div>
 
-              <div class="card">
-                <div class="card-head">
-                  <div class="card-title">Floating Images</div>
-                  <button class="btn btn-ghost btn-xs" id="add-float-img"><i data-lucide="plus"></i>Add</button>
-                </div>
-                <div class="card-body"><div id="float-img-list" class="float-img-list"></div></div>
-              </div>
-            </div>
-          </div>
+              <!-- Replace your existing Floating Images card with this: -->
+<div class="card">
+  <div class="card-head">
+    <div class="card-title">Floating Images</div>
+    <div class="flex gap-2">
+      <!-- Hidden file input to pick multiple floating images -->
+      <input type="file" id="float-img-input" accept="image/*" multiple style="display: none;" />
+      <button class="btn btn-ghost btn-xs" id="add-float-img" type="button">
+        <i data-lucide="plus"></i>Add
+      </button>
+      <!-- New Save button -->
+      <button class="btn btn-primary btn-xs" id="save-float-img" type="button">
+        <i data-lucide="save"></i>Save
+      </button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div id="float-img-list" class="float-img-list grid gap-2"></div>
+  </div>
+</div>
 
           <div class="card mt-3">
             <div class="card-head"><div class="card-title">Existing Banners</div></div>
