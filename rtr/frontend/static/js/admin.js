@@ -283,6 +283,7 @@
     products: () => APIClient.get('/api/admin/products'),
     createProduct: (fd) => APIClient.upload('/api/admin/products', fd, 'POST',{retries:0}),
     updateProduct: (id, fd) => APIClient.upload(`/api/admin/products/${id}`, fd, 'PUT',{retries:0}),
+    deleteProduct: (id) => APIClient.delete(`/api/admin/products/${id}`, { retries: 0 }),
     banners: (active = true) => APIClient.get(`/api/banners?active=${active}`),
     publicProducts: (params = {}) => APIClient.get(`/api/products${qs(params)}`),
   };
@@ -933,6 +934,7 @@
       if (!this.modal) return;
       ImageUpload.init('pm-upload-zone', 'pm-image-preview');
       on($('#pm-save'), 'click', () => this.save());
+      on($('#pm-delete'), 'click', () => this.deleteProduct());
       // live margin display
       ['pm-price', 'pm-cost'].forEach((id) => on(document.getElementById(id), 'input', () => this.updateMargin()));
     },
@@ -952,6 +954,7 @@
       ImageUpload.reset();
       $$('.field-error', this.modal).forEach((n) => n.remove());
       this.updateMargin();
+      const delBtn = $('#pm-delete'); if (delBtn) delBtn.classList.toggle('hidden', !product);
       Modal.open('product-modal');
     },
     updateMargin() {
@@ -996,6 +999,23 @@
       } catch (e) {
         Log.error('save product', e);
         Notify.error(e.message || 'Failed to save product');
+      } finally { btn.disabled = false; btn.innerHTML = orig; }
+    },
+    async deleteProduct() {
+      if (!this.editing) return;
+      const name = this.editing.name || 'this product';
+      if (!confirm(`Delete "${name}"? This action cannot be undone.`)) return;
+      const btn = $('#pm-delete'); const orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Deleting…';
+      try {
+        await API.deleteProduct(this.editing.id);
+        Notify.success('Product deleted');
+        Modal.close('product-modal');
+        Store.invalidate('products');
+        await ProductsModule.load();
+      } catch (e) {
+        Log.error('delete product', e);
+        Notify.error(e.message || 'Failed to delete product');
       } finally { btn.disabled = false; btn.innerHTML = orig; }
     },
   };
