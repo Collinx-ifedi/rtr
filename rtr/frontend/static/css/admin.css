@@ -102,7 +102,7 @@ table { border-collapse: collapse; width: 100%; }
   --t-slow: 0.4s;
 
   /* Z-index scale */
-  --z-sidebar: 50;
+  --z-sidebar: 70; /* raised above --z-overlay (60) so the mobile sidebar isn't blurred/unclickable under the backdrop */
   --z-overlay: 60;
   --z-topbar: 40;
   --z-dropdown: 120;
@@ -1033,6 +1033,12 @@ table tbody tr:hover td { background: rgba(196, 149, 106, 0.04); }
   .modal-foot .btn { width: 100%; }
   .hide-mobile { display: none !important; }
   .section-head { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
+
+  /* Topbar: reclaim horizontal space so the mobile toggle + right-side buttons don't compress each other */
+  .topbar { padding: 0 0.75rem; }
+  .topbar-right .btn { padding: 0.45rem 0.7rem; font-size: 0.75rem; gap: 0.3rem; }
+  /* Restore label text on topbar action buttons (e.g. Banner) that .hide-mobile would otherwise strip down to just the icon */
+  .topbar-right .btn .hide-mobile { display: inline !important; }
 }
 @media (max-width: 560px) {
   .stat-row, .stat-grid-6 { grid-template-columns: 1fr 1fr; }
