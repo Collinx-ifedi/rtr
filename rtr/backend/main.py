@@ -43,7 +43,7 @@ from .core import (
     verify_password,
     create_access_token
 )
-from .utils import logger
+from .utils import logger, log_action
 
 # --- SERVICES ---
 from .services import (
@@ -74,6 +74,7 @@ from .models_schemas import (
     Banner,
     BannerSchema,
     BannerCreateSchema,
+    BannerType,
     Order,
     OrderResponse,
     OrderStatus,
@@ -548,11 +549,63 @@ async def delete_product(product_id: int, db: AsyncSession = Depends(get_db), ad
 
 @admin_router.post("/banners", response_model=BannerSchema, status_code=status.HTTP_201_CREATED)
 async def create_banner_route(
-    banner_data: BannerCreateSchema,
+    title: Optional[str] = Form(None),
+    section_type: BannerType = Form(BannerType.HERO),
+    target_url: Optional[str] = Form(None),
+    display_order: int = Form(0),
+    is_active: bool = Form(True),
+    image_url: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
+    final_image_url = image_url
+
+    # If a physical file is uploaded, push it asynchronously to Cloudinary
+    if file and file.filename:
+        try:
+            upload_result = await asyncio.to_thread(
+                cloudinary.uploader.upload, file.file, folder="rtr_banners"
+            )
+            final_image_url = upload_result.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary banner upload error: {e}")
+            raise HTTPException(status_code=400, detail=f"Banner Image Upload Error: {str(e)}")
+
+    if not final_image_url:
+        raise HTTPException(
+            status_code=400, 
+            detail="Please upload a physical banner image file or provide a valid image URL."
+        )
+
+    banner_data = BannerCreateSchema(
+        image_url=final_image_url,
+        section_type=section_type,
+        title=title,
+        target_url=target_url,
+        display_order=display_order,
+        is_active=is_active
+    )
+    
     return await create_banner_service(db, banner_data, admin.username)
+
+@admin_router.delete("/banners/{banner_id}")
+async def delete_banner_route(
+    banner_id: int, 
+    db: AsyncSession = Depends(get_db), 
+    admin: Admin = Depends(get_current_admin)
+):
+    result = await db.execute(select(Banner).where(Banner.id == banner_id))
+    banner = result.scalar_one_or_none()
+    
+    if not banner:
+        raise HTTPException(status_code=404, detail="Banner not found.")
+    
+    await db.delete(banner)
+    await db.commit()
+    
+    log_action("banner_deleted", actor=f"admin_{admin.username}", metadata={"banner_id": banner_id})
+    return {"status": "success", "detail": "Banner deleted successfully."}
 
 
 # =========================================================
