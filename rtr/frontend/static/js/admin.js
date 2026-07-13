@@ -318,7 +318,10 @@
     handleUnauthorized() {
       Notify.error('Your session has expired. Please sign in again.');
       Storage.remove(CONFIG.TOKEN_KEY);
+      Storage.remove(CONFIG.ADMIN_KEY);
+      Store.set('auth', { token: null, admin: null });
       EventBus.emit('auth:expired');
+      window.location.href = CONFIG.LOGIN_URL;
     },
     hydrate() {
       const token = Storage.get(CONFIG.TOKEN_KEY);
