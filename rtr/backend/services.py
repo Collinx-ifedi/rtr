@@ -3,7 +3,10 @@
 # Rocky Trendy Realities - Pure E-Commerce & AI Customizer
 
 import logging
+import os
+import yaml
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Optional, List, Dict, Any
 
 from fastapi import HTTPException, status
@@ -16,6 +19,7 @@ from sqlalchemy import update, delete, or_
 from .models_schemas import (
     User,
     Admin,
+    AdminRole,
     Product,
     Order,
     OrderItem,
@@ -34,12 +38,12 @@ from .utils import (
     generate_otp,
     send_email_otp,
     send_fulfillment_email,
-    log_action
+    log_action,
+    generate_random_token
 )
 
 from .core import (
     create_access_token,
-    hash_password,
     verify_password,
     settings
 )
@@ -59,190 +63,325 @@ logger.setLevel(logging.INFO)
 # =========================================================
 
 async def create_user_service(db: AsyncSession, email: str, password: str, country: str) -> User:
-    """Registers a new user and triggers email verification."""
-    result = await db.execute(select(User).where(User.email == email))
+    """Registers a new user and triggers email verification via secure OTP."""
+    # Convert email to lowercase to prevent duplicates
+    email_clean = email.strip().lower()
+    
+    query = select(User).where(User.email == email_clean)
+    result = await db.execute(query)
     existing_user = result.scalar_one_or_none()
-
-    hashed_pw = hash_password(password)
-    otp_code = generate_otp()
-    otp_expiry_dt = datetime.utcnow() + timedelta(minutes=10)
-
+    
     if existing_user:
-        if existing_user.is_verified:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="An account with this email address already exists."
-            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An account with this email address already exists."
+        )
         
-        # Treat as a verification resend/retry for unverified accounts
-        existing_user.password_hash = hashed_pw
-        existing_user.country = country
-        existing_user.email_otp = otp_code
-        existing_user.otp_expiry = otp_expiry_dt
-        
-        await db.commit()
-        await db.refresh(existing_user)
-        
-        try:
-            await send_email_otp(email, otp_code, OTPPurpose.EMAIL_VERIFY)
-            log_action("resend_verification_otp", actor=f"user_{existing_user.id}", metadata={"email": email})
-        except Exception as e:
-            logger.error(f"Failed to resend welcome email to {email}: {e}")
-        
-        return existing_user
-
+    # Using secure hashing from core for standard users
+    from .core import hash_password 
+    hashed = hash_password(password)
+    
     new_user = User(
-        email=email,
-        password_hash=hashed_pw,
+        email=email_clean,
+        password_hash=hashed,
         country=country,
-        email_otp=otp_code,
-        otp_expiry=otp_expiry_dt,
         is_verified=False,
-        balance=0.0
+        balance=Decimal('0.00')
     )
     
     db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
-
-    try:
-        await send_email_otp(email, otp_code, OTPPurpose.EMAIL_VERIFY)
-        log_action("user_registered", actor=f"user_{new_user.id}", metadata={"email": email, "country": country})
-    except Exception as e:
-        logger.error(f"Failed to send welcome email to {email}: {e}")
+    await db.flush() # flush to get an ID for logs
     
+    # Generate Activation OTP
+    otp_code = generate_otp()
+    expires_at = datetime.utcnow() + timedelta(minutes=15)
+    
+    # Invalidate any old tokens for this user
+    await db.execute(
+        update(User)
+        .where(User.id == new_user.id)
+        .values(email_otp=otp_code, otp_expiry=expires_at)
+    )
+    
+    # Send verification email asynchronously
+    try:
+        await send_email_otp(email_clean, otp_code, OTPPurpose.EMAIL_VERIFY)
+    except Exception as e:
+        logger.error(f"Failed to send activation email to user {email_clean}: {e}")
+        
+    await db.commit()
+    log_action("user_registered", actor=f"user_{new_user.id}", metadata={"email": email_clean})
     return new_user
 
-async def verify_user_email_service(db: AsyncSession, email: str, otp: str) -> Dict[str, str]:
-    """Verifies a user's email address and clears transient OTP fields."""
-    result = await db.execute(select(User).where(User.email == email))
+async def verify_user_email_service(db: AsyncSession, email: str, otp: str) -> Dict[str, Any]:
+    """Validates user's email address via the generated activation code."""
+    email_clean = email.strip().lower()
+    query = select(User).where(User.email == email_clean)
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
-
+    
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found.")
+        
     if user.is_verified:
-        return {"message": "Account is already verified. Please log in."}
-    if user.email_otp != otp:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification code.")
-    if user.otp_expiry and datetime.utcnow() > user.otp_expiry:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code has expired. Please request a new one.")
-
+        return {"status": "already_verified", "message": "Email is already verified."}
+        
+    if not user.email_otp or user.email_otp != otp:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification code provided.")
+        
+    if user.otp_expiry and user.otp_expiry < datetime.utcnow():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code has expired.")
+        
     user.is_verified = True
     user.email_otp = None
     user.otp_expiry = None
     
     await db.commit()
-    log_action("email_verified", actor=f"user_{user.id}", metadata={"email": email})
-    return {"message": "Email verified successfully."}
-
-async def resend_otp_service(db: AsyncSession, email: str) -> Dict[str, str]:
-    """Generates a new OTP for an unverified user and resends the verification email."""
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account with this email was not found.")
+    log_action("user_email_verified", actor=f"user_{user.id}", metadata={"email": email_clean})
     
-    if user.is_verified:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account is already verified. Please log in.")
+    # Generate persistent system session tokens
+    token_payload = {"sub": user.email, "id": user.id, "role": "user"}
+    access_token = create_access_token(data=token_payload)
+    
+    return {
+        "status": "success",
+        "message": "Email verified successfully.",
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
 
-    new_otp = generate_otp()
-    user.email_otp = new_otp
-    user.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
-
+async def resend_otp_service(db: AsyncSession, email: str, purpose: OTPPurpose) -> Dict[str, str]:
+    """Regenerates and dispatches a fresh security token to the target inbox."""
+    email_clean = email.strip().lower()
+    query = select(User).where(User.email == email_clean)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found.")
+        
+    otp_code = generate_otp()
+    expires_at = datetime.utcnow() + timedelta(minutes=15)
+    
+    user.email_otp = otp_code
+    user.otp_expiry = expires_at
     await db.commit()
-
+    
     try:
-        await send_email_otp(email, new_otp, OTPPurpose.EMAIL_VERIFY)
-        log_action("resend_otp", actor=f"user_{user.id}", metadata={"email": email})
+        await send_email_otp(email_clean, otp_code, purpose)
     except Exception as e:
-        logger.error(f"Failed to resend OTP email to {email}: {str(e)}")
+        logger.error(f"Error resending OTP code to {email_clean}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send verification email. Please try again later."
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to dispatch verification email. Please try again."
         )
-
-    return {"message": "A new verification code has been sent to your email."}
+        
+    return {"detail": "Verification code has been successfully resent."}
 
 # =========================================================
-# 2. ADMIN, MODERATION & CMS SERVICES
+# 2. SEEDING & ADMINISTRATIVE BOOTSTRAPPING
 # =========================================================
 
 async def bootstrap_admins(db: AsyncSession) -> None:
-    """Seeds admin accounts on startup using environment credentials."""
-    admin_users = settings.ADMIN_USERNAMES.split(",") if hasattr(settings, 'ADMIN_USERNAMES') and settings.ADMIN_USERNAMES else []
-    admin_passwords = settings.ADMIN_PASSWORDS.split(",") if hasattr(settings, 'ADMIN_PASSWORDS') and settings.ADMIN_PASSWORDS else []
-
-    admin_credentials = dict(zip([u.strip() for u in admin_users], [p.strip() for p in admin_passwords]))
-
-    for username, password in admin_credentials.items():
-        if not username or not password:
-            continue
-        result = await db.execute(select(Admin).where(Admin.username == username))
-        if not result.scalar_one_or_none():
-            logger.info(f"Seeding administrative account: {username}")
-            role = "superadmin" if username == "admin" else "admin"
-            new_admin = Admin(
-                username=username, 
-                password_hash=hash_password(password), 
-                role=role, 
-                is_active=True
-            )
-            db.add(new_admin)
+    """Bootstraps default administrator configurations into persistent state safely."""
+    # Resolve absolute pathing dynamically for target environment injection
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    admin_yaml_path = os.path.join(base_dir, getattr(settings, "ADMIN_CREDENTIALS_FILE", "admins.yaml"))
+    
+    if not os.path.exists(admin_yaml_path):
+        logger.warning(f"Administration bootstrap skipped: credential definition file not found ({admin_yaml_path}).")
+        return
+        
+    try:
+        with open(admin_yaml_path, "r") as file:
+            config = yaml.safe_load(file)
             
-    await db.commit()
+        admins_data = config.get("admins", [])
+        for admin_info in admins_data:
+            username = admin_info.get("username")
+            password = admin_info.get("password")
+            role_str = admin_info.get("role", "manager")
+            
+            # Look for existing admin
+            existing = await db.execute(select(Admin).where(Admin.username == username))
+            admin_record = existing.scalar_one_or_none()
+            
+            if not admin_record:
+                # Explicit requirement: Preserving raw passwords per infrastructure config rules
+                new_admin = Admin(
+                    username=username,
+                    password_hash=password, 
+                    role=AdminRole(role_str)
+                )
+                db.add(new_admin)
+                logger.info(f"Administrative account bootstrapped successfully: '{username}'")
+                
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Failed to cleanly execute administrative bootsrap operations: {e}")
+        await db.rollback()
 
-async def admin_login_service(db: AsyncSession, username: str, password: str) -> str:
-    """Authenticates admin user and returns a secure JWT access token."""
-    result = await db.execute(select(Admin).where(Admin.username == username))
-    admin = result.scalar_one_or_none()
-    
-    if not admin or not verify_password(password, admin.password_hash):
-        log_action("admin_login_failed", actor=username)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid administrative credentials.")
-    if not admin.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This administrative account has been deactivated.")
-    
-    admin.last_login = datetime.utcnow()
-    await db.commit()
-    
-    log_action("admin_login_success", actor=f"admin_{admin.username}")
-    return create_access_token({"sub": admin.username, "role": admin.role.value if hasattr(admin.role, 'value') else str(admin.role)})
+# =========================================================
+# 3. CORE E-COMMERCE & ORDER CHECKOUT DISPATCH
+# =========================================================
 
-async def moderate_user_service(
+async def create_order_service(
     db: AsyncSession, 
-    user_id: int, 
-    action: str, 
-    admin_username: str
-) -> Dict[str, str]:
-    """Allows administrators to ban or unban users from the platform."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    order_data: CheckoutRequest, 
+    user_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Validates inventory stock, aggregates totals using high-precision Decimal, constructs systemic 
+    instances, and issues transactional hooks for either automated payment processing or manual WhatsApp routing.
+    """
+    # 1. GENERATE SYSTEM REF
+    order_ref = f"RTR-{int(datetime.utcnow().timestamp())}-{generate_random_token(4).upper()}"
+    total_amount = Decimal('0.00')
+    order_items_to_create = []
 
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found.")
+    # 2. VALIDATE PRODUCTS, THREAD-SAFE STOCK LOCK, AND CALCULATE METRICS
+    for item in order_data.items:
+        # with_for_update() enforces a row-level pessimistic lock to prevent race conditions on stock
+        prod_query = select(Product).where(Product.id == item.product_id).with_for_update()
+        prod_res = await db.execute(prod_query)
+        product = prod_res.scalar_one_or_none()
+        
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product with reference identifier #{item.product_id} was not found."
+            )
+            
+        if product.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Product '{product.name}' is no longer active in our catalog."
+            )
+            
+        if product.quantity < item.quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient inventory on '{product.name}'. Remaining stock: {product.quantity} units."
+            )
+            
+        # Lock in and deduct product inventory safely
+        product.quantity -= item.quantity
+        
+        # Calculate strict decimal price metrics
+        item_total = product.price * Decimal(str(item.quantity))
+        total_amount += item_total
+        
+        # Hydrate order line record
+        order_item = OrderItem(
+            product_id=product.id,
+            product_name_snapshot=product.name,
+            product_image_snapshot=product.image_url,
+            quantity=item.quantity,
+            unit_price_at_purchase=product.price,
+            is_customized=item.is_customized,
+            customization_notes=item.customization_notes,
+            custom_image_url=item.custom_image_url
+        )
+        order_items_to_create.append(order_item)
 
-    if action == "ban":
-        user.is_banned = True
-        detail_msg = f"User {user.email} has been suspended."
-    elif action == "unban":
-        user.is_banned = False
-        detail_msg = f"User {user.email} has been reinstated."
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid moderation action.")
-
-    await db.commit()
-    
-    log_action(
-        action=f"user_{action}", 
-        actor=f"admin_{admin_username}", 
-        metadata={"target_user_id": user_id, "target_email": user.email}
+    # 3. PERSIST THE SYSTEMIC ORDER INSTANCE
+    new_order = Order(
+        order_reference=order_ref,
+        user_id=user_id,
+        customer_email=order_data.customer_email,
+        customer_phone=order_data.customer_phone,
+        shipping_address=order_data.shipping_address,
+        total_amount=total_amount,
+        status=OrderStatus.PENDING,
+        payment_method=order_data.payment_method,
     )
     
-    return {"status": "success", "detail": detail_msg}
+    # Establish direct model mapping lines
+    new_order.items = order_items_to_create
+    db.add(new_order)
+    await db.flush() # Populate DB IDs
 
-async def create_banner_service(db: AsyncSession, banner_data: BannerCreateSchema, admin_username: str) -> Banner:
-    """Creates a new promotional banner for the storefront carousel."""
+    # 4. CHOOSE CHECKOUT DISPATCH LOGIC PATH
+    if order_data.payment_method == PaymentMethod.WHATSAPP:
+        # WhatsApp Mode: Bypass external payment initialization. Commit immediately.
+        await db.commit()
+        
+        log_action(
+            "order_created_whatsapp", 
+            actor=f"user_{user_id}" if user_id else "guest", 
+            order_reference=order_ref, 
+            metadata={"total": float(total_amount)}
+        )
+        
+        return {
+            "order_reference": order_ref,
+            "whatsapp_redirect": True
+        }
+        
+    else:
+        # Paystack Mode: Connect transaction engine context
+        amount_kobo = int(total_amount * 100) # Paystack expects strictly integer value in Kobo/Cents
+        
+        try:
+            paystack_res = await initialize_transaction(
+                email=order_data.customer_email,
+                amount=amount_kobo,
+                reference=order_ref,
+                metadata={"user_id": user_id, "phone": order_data.customer_phone}
+            )
+        except Exception as err:
+            # Fallback block: Rollback pessimistic locks and decrements if external gateway connection faults
+            logger.error(f"Paystack payment initiation failed for reference {order_ref}: {str(err)}")
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Payment Gateway is currently unresponsive. Your cart state has been preserved."
+            )
+            
+        if not paystack_res or not paystack_res.get("status"):
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Paystack Initialization Error: {paystack_res.get('message', 'Unknown failure')}"
+            )
+            
+        data = paystack_res["data"]
+        checkout_url = data["authorization_url"]
+        payment_ref = data["reference"]
+        
+        # Link paystack tracking details
+        new_order.payment_reference = payment_ref
+        
+        # Save historical transactional logs
+        tx_record = Transaction(
+            order_id=new_order.id,
+            user_id=user_id,
+            tx_hash=payment_ref,
+            amount=total_amount,
+            status="pending",
+            provider="Paystack"
+        )
+        db.add(tx_record)
+        
+        await db.commit()
+        log_action(
+            "order_created_paystack", 
+            actor=f"user_{user_id}" if user_id else "guest", 
+            order_reference=order_ref, 
+            metadata={"payment_ref": payment_ref, "total": float(total_amount)}
+        )
+        
+        return {
+            "checkout_url": checkout_url,
+            "order_reference": order_ref
+        }
+
+# =========================================================
+# 4. CONTENT MANAGEMENT SERVICES (CMS)
+# =========================================================
+
+async def create_banner_service(db: AsyncSession, banner_data: BannerCreateSchema) -> Banner:
+    """Inserts an active marketing asset link or slider reference inside the global store front."""
     new_banner = Banner(
         image_url=banner_data.image_url,
         section_type=banner_data.section_type,
@@ -253,174 +392,41 @@ async def create_banner_service(db: AsyncSession, banner_data: BannerCreateSchem
     )
     db.add(new_banner)
     await db.commit()
-    await db.refresh(new_banner)
-    
-    log_action("banner_created", actor=f"admin_{admin_username}", metadata={"banner_id": new_banner.id, "section": str(banner_data.section_type)})
+    log_action("banner_created", actor="admin", metadata={"section": banner_data.section_type.value})
     return new_banner
 
 # =========================================================
-# 3. ORDER CREATION & CHECKOUT SERVICES
+# 5. USER MODERATION & ADMINISTRATION CONTROLS
 # =========================================================
 
-async def create_order_service(db: AsyncSession, user_id: int, order_data: CheckoutRequest) -> str:
-    """
-    Orchestrates order creation for physical catalog items.
-    1. Validates stock availability atomically.
-    2. Calculates total cost (including AI customization snapshots).
-    3. Initializes Paystack payment gateway transaction.
-    4. Returns authorization checkout URL.
-    """
-    if not order_data.items:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Your checkout cart is empty.")
-
-    user_res = await db.execute(select(User).where(User.id == user_id))
-    user = user_res.scalar_one_or_none()
+async def moderate_user_service(db: AsyncSession, user_id: int, action: str) -> Dict[str, str]:
+    """Suspends, activates, or limits actions on customer accounts."""
+    query = select(User).where(User.id == user_id)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found.")
-
-    # Pre-fetch catalog items
-    product_ids = [item.product_id for item in order_data.items]
-    stmt = select(Product).where(Product.id.in_(product_ids)).where(or_(Product.is_deleted == False, Product.is_deleted.is_(None)))
-    result = await db.execute(stmt)
-    products_db = {p.id: p for p in result.scalars().all()}
-    
-    if len(products_db) != len(product_ids):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more items in your cart are no longer available.")
-
-    total_amount = 0.0
-    order_items_objects = []
-
-    # Validate stock quantities and calculate financial totals
-    for item in order_data.items:
-        product = products_db[item.product_id]
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target customer account does not exist.")
         
-        if product.quantity < item.quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=f"Insufficient stock available for '{product.name}'. Only {product.quantity} remaining."
-            )
-        
-        total_amount += product.price * item.quantity
-        
-        order_items_objects.append(
-            OrderItem(
-                product_id=product.id,
-                quantity=item.quantity,
-                unit_price_at_purchase=product.price,
-                product_name_snapshot=product.name,
-                product_image_snapshot=product.image_url,
-                is_customized=item.is_customized,
-                customization_notes=item.customization_notes,
-                custom_image_url=item.custom_image_url
-            )
-        )
-
-    # Generate unique order reference
-    order_ref = f"RTR-{generate_otp(length=10)}"
-    
-    new_order = Order(
-        user_id=user_id,
-        order_reference=order_ref,
-        customer_email=order_data.customer_email,
-        customer_phone=order_data.customer_phone,
-        shipping_address=order_data.shipping_address,
-        total_amount=round(total_amount, 2),
-        status=OrderStatus.PENDING,
-        payment_method=PaymentMethod.PAYSTACK,
-        customer_ip="0.0.0.0"
-    )
-    db.add(new_order)
-    await db.flush()
-
-    for order_item in order_items_objects:
-        order_item.order_id = new_order.id
-        db.add(order_item)
-
-    try:
-        # Paystack expects amounts in the lowest currency denomination (kobo for NGN)
-        amount_in_kobo = int(total_amount * 100)
-        frontend_callback = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000') + "/checkout/callback"
-        
-        paystack_data = await initialize_transaction(
-            email=order_data.customer_email,
-            amount=amount_in_kobo,
-            reference=order_ref,
-            callback_url=frontend_callback,
-            metadata={
-                "custom_fields": [
-                    {"display_name": "Customer Phone", "variable_name": "phone", "value": order_data.customer_phone},
-                    {"display_name": "Order Reference", "variable_name": "order_ref", "value": order_ref}
-                ]
-            }
-        )
-
+    if action == "suspend":
+        user.is_verified = False # Revokes active system accessibility
+        user.is_banned = True
         await db.commit()
-        log_action("order_initialized", actor=f"user_{user_id}", order_reference=order_ref, metadata={"total": total_amount})
-        return paystack_data.get("authorization_url")
-
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Order creation failed during Paystack initialization: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to communicate with payment gateway. Please try again.")
+        log_action("user_suspended", actor="admin", metadata={"target_user": user_id})
+        return {"status": "suspended", "detail": "User has been suspended successfully."}
+        
+    elif action == "activate":
+        user.is_verified = True
+        user.is_banned = False
+        await db.commit()
+        log_action("user_activated", actor="admin", metadata={"target_user": user_id})
+        return {"status": "activated", "detail": "User has been activated successfully."}
+        
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported moderation command.")
 
 # =========================================================
-# 4. FULFILLMENT & INVENTORY MANAGEMENT
+# 6. SYSTEM ORDER FULFILLMENT ROUTINES
 # =========================================================
-
-async def process_successful_payment(db: AsyncSession, order_ref: str, tx_hash: str) -> None:
-    """
-    Called by Paystack webhook handlers when a charge is confirmed successful.
-    1. Locates the pending order.
-    2. Deducts physical inventory atomically.
-    3. Updates order status to PAID.
-    4. Records the financial transaction and triggers customer email notifications.
-    """
-    stmt = (
-        select(Order)
-        .where(Order.order_reference == order_ref)
-        .options(selectinload(Order.items))
-    )
-    result = await db.execute(stmt)
-    order = result.scalar_one_or_none()
-
-    # Idempotency check to prevent duplicate inventory deduction on retried webhooks
-    if not order or order.status in [OrderStatus.PAID, OrderStatus.PROCESSING, OrderStatus.SHIPPED, OrderStatus.DELIVERED]:
-        logger.warning(f"Webhook processing skipped for reference {order_ref}: Order not found or already processed.")
-        return
-
-    # Atomic physical inventory deduction
-    for item in order.items:
-        await db.execute(
-            update(Product)
-            .where(Product.id == item.product_id)
-            .values(quantity=Product.quantity - item.quantity)
-        )
-
-    order.status = OrderStatus.PAID
-    order.payment_reference = tx_hash
-
-    db.add(Transaction(
-        user_id=order.user_id, 
-        order_id=order.id, 
-        amount=order.total_amount,
-        status="confirmed", 
-        provider="Paystack", 
-        tx_hash=str(tx_hash)
-    ))
-    
-    await db.commit()
-
-    try:
-        await send_fulfillment_email(
-            user_email=order.customer_email,
-            product_name="Your Rocky Trendy Realities Order",
-            order_reference=order_ref,
-            manual_text="We have successfully received your payment. Our logistics and design teams are currently processing your items for fulfillment."
-        )
-    except Exception as e:
-        logger.error(f"Failed to send payment confirmation email for order {order_ref}: {e}")
-    
-    log_action("payment_confirmed", actor="paystack_webhook", order_reference=order_ref, metadata={"tx_hash": tx_hash})
 
 async def process_admin_order_action(
     db: AsyncSession, 
@@ -428,25 +434,29 @@ async def process_admin_order_action(
     action: str, 
     manual_content: Optional[str] = None
 ) -> Dict[str, str]:
-    """Handles admin manual fulfillment workflows for physical logistics."""
-    stmt = (
-        select(Order)
-        .options(selectinload(Order.user))
-        .where(Order.id == order_id)
-    )
-    result = await db.execute(stmt)
+    """Manages order pipelines, processing status triggers, cancellations, and manual confirmations."""
+    query = select(Order).where(Order.id == order_id).options(selectinload(Order.items))
+    result = await db.execute(query)
     order = result.scalar_one_or_none()
-
+    
     if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
-
-    if action == "reject" or action == "cancel":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order instance was not found.")
+        
+    if action == "cancel":
+        # Check and restore locked product stocks back to the catalog if cancelled
+        for item in order.items:
+            prod_query = select(Product).where(Product.id == item.product_id).with_for_update()
+            prod_res = await db.execute(prod_query)
+            product = prod_res.scalar_one_or_none()
+            if product:
+                product.quantity += item.quantity # Restock
+                
         order.status = OrderStatus.CANCELLED
         order.updated_at = datetime.utcnow()
         await db.commit()
         log_action("order_cancelled_by_admin", actor="admin", order_reference=order.order_reference)
         return {"status": "cancelled", "detail": "Order has been cancelled."}
-
+        
     if action == "ship":
         order.status = OrderStatus.SHIPPED
         order.fulfillment_note = manual_content or "Your order has been shipped and is on its way."
@@ -462,15 +472,15 @@ async def process_admin_order_action(
             )
         except Exception as e:
             logger.error(f"Failed to send shipping notification email for order {order.order_reference}: {e}")
-
+            
         log_action("order_shipped", actor="admin", order_reference=order.order_reference)
         return {"status": "shipped", "detail": "Order marked as shipped."}
-
+        
     if action == "complete" or action == "deliver":
         order.status = OrderStatus.DELIVERED
         order.updated_at = datetime.utcnow()
         await db.commit()
         log_action("order_delivered", actor="admin", order_reference=order.order_reference)
         return {"status": "delivered", "detail": "Order marked as delivered."}
-
+        
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid fulfillment action.")

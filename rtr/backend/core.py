@@ -22,8 +22,8 @@ from sqlalchemy.future import select
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import ValidationError, Field
 
-from .db import get_db
-from .models_schemas import User, Admin, AdminRole
+from db import get_db
+from models_schemas import User, Admin, AdminRole
 
 # Configure Logger
 logger = logging.getLogger("app.core")
@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     REDIS_URL: Optional[str] = Field(default=None) # Added for CMS Caching
     CLOUDINARY_URL: Optional[str] = Field(default=None)
     
+    # AI Customization Configuration
+    REPLICATE_API_TOKEN: Optional[str] = Field(default=None)
+    
     # Paystack Configuration
     PAYSTACK_SECRET_KEY: str = Field(...)
     
@@ -73,6 +76,12 @@ class Settings(BaseSettings):
     
     # Asset Management Paths
     FRONTEND_DIR_PATH: str = Field(default=_RESOLVED_FRONTEND_PATH)
+
+    # Storefront Integrations
+    WHATSAPP_PHONE: str = Field(default="2340000000000")
+    LIVECHAT_LICENSE: Optional[str] = Field(default=None)
+    SOCIAL_FACEBOOK: Optional[str] = Field(default=None)
+    SOCIAL_INSTAGRAM: Optional[str] = Field(default=None)
 
     model_config = SettingsConfigDict(
         env_file=".env",

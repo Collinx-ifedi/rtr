@@ -1,12 +1,14 @@
 # main.py
 # Production-level FastAPI Entry Point
-# Rocky Trendy Realities — Pure E-Commerce & AI Customization
+# Rocky Trendy Realities — Pure E-Commerce & AI Customizer
 
 import os
 import time
 import shutil
 import asyncio
 import logging
+import yaml
+from decimal import Decimal
 from pathlib import Path
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -50,7 +52,6 @@ from .services import (
     create_user_service,
     resend_otp_service,
     verify_user_email_service,
-    admin_login_service,
     bootstrap_admins,
     create_order_service,
     create_banner_service,
@@ -85,9 +86,10 @@ from .models_schemas import (
 # 1. SETUP & PATH RESOLUTION
 # =========================================================
 
+# Dynamic absolute path resolution targeting the specific 'frontend' subfolder
+# Ensures 404s are prevented across production deployment environments
 BASE_DIR = Path(__file__).resolve().parent      
-PROJECT_ROOT = BASE_DIR.parent                  
-FRONTEND_DIR = PROJECT_ROOT / "frontend"        
+FRONTEND_DIR = BASE_DIR / "frontend"        
 UPLOAD_DIR = BASE_DIR / "temp_uploads"          
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -137,7 +139,7 @@ async def lifespan(app: FastAPI):
     if not is_db_up:
         logger.critical("Database connectivity check failed during startup.")
     
-    # Seed administrative accounts
+    # Seed administrative accounts (Fallbacks only)
     async for db in get_db():
         await bootstrap_admins(db)
         break 
@@ -216,7 +218,6 @@ async def generate_design_customization(
     user: User = Depends(get_current_user),
     ai_service: AIService = Depends(get_ai_service)
 ):
-    """Generates a custom furniture rendering via AI and streams it directly to Cloudinary."""
     try:
         secure_url = await ai_service.generate_custom_furniture_image(
             prompt=prompt,
@@ -344,8 +345,32 @@ async def checkout_route(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        checkout_url = await create_order_service(db, user.id, order_data)
-        return {"checkout_url": checkout_url}
+        result = await create_order_service(db, user.id, order_data)
+        
+        # Branch on response format: WhatsApp Redirect vs Paystack Gateway
+        if isinstance(result, dict) and result.get("whatsapp_redirect"):
+            return {
+                "status": "success",
+                "message": "Order created successfully for WhatsApp fulfillment.",
+                "payment_method": "whatsapp",
+                "order_reference": result.get("order_reference"),
+                "whatsapp_redirect": True
+            }
+        
+        # Fallback/Default: Existing Paystack integration contract
+        if isinstance(result, dict):
+            return {
+                "status": "success",
+                "message": "Transaction initialized",
+                "authorization_url": result.get("authorization_url"),
+                "checkout_url": result.get("authorization_url"), # Kept for backward compatibility
+                "access_code": result.get("access_code"),
+                "reference": result.get("reference")
+            }
+        
+        # Legacy fallback if create_order_service returns a direct string
+        return {"checkout_url": result}
+
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -369,10 +394,38 @@ admin_router = APIRouter(prefix="/api/admin", tags=["Store Administration"])
 
 @admin_router.post("/login")
 async def admin_login_route(data: AdminLoginSchema, db: AsyncSession = Depends(get_db)):
-    token = await admin_login_service(db, data.username, data.password)
+    # Validate against unhashed credentials from environment variables or YAML configs explicitly
+    admin_users_env = os.getenv("ADMIN_USERNAMES", "")
+    admin_passwords_env = os.getenv("ADMIN_PASSWORDS", "")
+    
+    if not admin_users_env or not admin_passwords_env:
+        try:
+            with open(BASE_DIR / "admin_credentials.yaml", "r") as f:
+                creds = yaml.safe_load(f)
+                admin_users_env = creds.get("ADMIN_USERNAMES", "")
+                admin_passwords_env = creds.get("ADMIN_PASSWORDS", "")
+        except FileNotFoundError:
+            logger.warning("Admin credentials YAML not found and environment variables are missing.")
+
+    admin_users = [u.strip() for u in admin_users_env.split(",") if u.strip()]
+    admin_passwords = [p.strip() for p in admin_passwords_env.split(",") if p.strip()]
+    credentials_map = dict(zip(admin_users, admin_passwords))
+    
+    if data.username not in credentials_map or credentials_map[data.username] != data.password:
+        log_action("admin_login_failed", actor=data.username)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid administrative credentials.")
+    
+    # Retrieve role state from the database
     result = await db.execute(select(Admin).where(Admin.username == data.username))
     admin = result.scalar_one_or_none()
-    role = admin.role.value if admin and hasattr(admin.role, 'value') else str(admin.role)
+    
+    if admin and not admin.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This administrative account has been deactivated.")
+        
+    role = admin.role.value if admin and hasattr(admin.role, 'value') else "admin"
+    
+    token = create_access_token({"sub": data.username, "type": "access", "role": role})
+    log_action("admin_login_success", actor=f"admin_{data.username}")
     
     return {
         "access_token": token, 
@@ -462,7 +515,7 @@ async def get_admin_products(db: AsyncSession = Depends(get_db), admin: Admin = 
 @admin_router.post("/products", response_model=ProductSchema, status_code=status.HTTP_201_CREATED)
 async def create_product(
     name: str = Form(...),
-    price: float = Form(...),
+    price: Decimal = Form(...), 
     quantity: int = Form(...),
     product_category: ProductCategory = Form(...),
     description: Optional[str] = Form(None),
@@ -482,7 +535,7 @@ async def create_product(
 
     new_product = Product(
         name=name,
-        price=price,
+        price=float(price), # Store appropriately based on ORM config
         quantity=quantity,
         product_category=product_category,
         description=description,
@@ -498,7 +551,7 @@ async def create_product(
 async def update_product(
     product_id: int,
     name: str = Form(...),
-    price: float = Form(...),
+    price: Decimal = Form(...),
     quantity: int = Form(...),
     product_category: Optional[ProductCategory] = Form(None),
     description: Optional[str] = Form(None),
@@ -515,7 +568,6 @@ async def update_product(
 
     if file:
         try:
-            # Offload synchronous Cloudinary API call to a background thread
             upload_result = await asyncio.to_thread(
                 cloudinary.uploader.upload, file.file, folder="rtr_products"
             )
@@ -524,7 +576,7 @@ async def update_product(
             raise HTTPException(status_code=400, detail=f"Image CDN Update Error: {str(e)}")
 
     product.name = name
-    product.price = price
+    product.price = float(price)
     product.quantity = quantity
     product.description = description
     product.is_featured = is_featured
@@ -561,7 +613,6 @@ async def create_banner_route(
 ):
     final_image_url = image_url
 
-    # If a physical file is uploaded, push it asynchronously to Cloudinary
     if file and file.filename:
         try:
             upload_result = await asyncio.to_thread(
@@ -608,6 +659,24 @@ async def delete_banner_route(
     return {"status": "success", "detail": "Banner deleted successfully."}
 
 
+# --- F. CONFIGURATION ROUTER ---
+config_router = APIRouter(prefix="/api/config", tags=["Configuration"])
+
+@config_router.get("/public")
+async def get_public_config():
+    """
+    Returns non-sensitive system settings and third-party integration 
+    keys needed by the storefront interface.
+    """
+    return {
+        "currency": "NGN",
+        "whatsapp_phone": getattr(settings, "WHATSAPP_PHONE", "2340000000000"),
+        "livechat_license": getattr(settings, "LIVECHAT_LICENSE", ""),
+        "social_facebook": getattr(settings, "SOCIAL_FACEBOOK", ""),
+        "social_instagram": getattr(settings, "SOCIAL_INSTAGRAM", "")
+    }
+
+
 # =========================================================
 # 6. REGISTER API ROUTERS
 # =========================================================
@@ -617,6 +686,7 @@ app.include_router(catalog_router)
 app.include_router(auth_router)
 app.include_router(order_router)
 app.include_router(admin_router)
+app.include_router(config_router)
 
 # =========================================================
 # 7. FRONTEND PAGE ROUTES (ADMIN PORTAL ONLY)
@@ -624,7 +694,6 @@ app.include_router(admin_router)
 
 @app.get("/")
 async def serve_admin_root():
-    """Redirects or serves the admin login page when accessing the root domain."""
     admin_login = FRONTEND_DIR / "admin-login.html"
     if admin_login.exists():
         return FileResponse(admin_login)
@@ -632,7 +701,6 @@ async def serve_admin_root():
 
 @app.get("/admin")
 async def serve_admin_alias():
-    """Allows accessing the admin login via /admin directly."""
     admin_login = FRONTEND_DIR / "admin-login.html"
     if admin_login.exists():
         return FileResponse(admin_login)
@@ -640,10 +708,6 @@ async def serve_admin_alias():
 
 @app.get("/{page_name}.html")
 async def serve_html_pages(page_name: str):
-    """
-    Dynamically captures and serves specific admin pages 
-    (e.g., admin-dashboard.html, admin-products.html, admin-content.html)
-    """
     file_path = FRONTEND_DIR / f"{page_name}.html"
     if file_path.exists():
         return FileResponse(file_path)
@@ -653,7 +717,6 @@ async def serve_html_pages(page_name: str):
 # 8. STATIC FILES (CSS, JS, Images for Admin Panel)
 # =========================================================
 
-# Ensure your CSS/JS assets inside frontend/static are accessible
 static_dir = FRONTEND_DIR / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=static_dir), name="static")

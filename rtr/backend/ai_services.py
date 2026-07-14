@@ -1,5 +1,5 @@
 # ai_services.py
-# Production-level AI Customization Layer (Hugging Face Test via OPENAI_API_KEY)
+# Production-level AI Customization Layer
 # Rocky Trendy Realities — Asynchronous Furniture Customizer & Cloud Storage
 
 import io
@@ -11,10 +11,11 @@ from typing import Optional
 import httpx
 import cloudinary
 import cloudinary.uploader
+import replicate
 from fastapi import HTTPException, status
 
-from .core import settings
-from .utils import log_action
+from core import settings
+from utils import log_action
 
 # =========================================================
 # CONFIG & LOGGING
@@ -29,115 +30,89 @@ logger.setLevel(logging.INFO)
 
 class AIService:
     """
-    Dedicated service handling external Hugging Face Stability Image synthesis, 
-    variant generation, and direct pipeline persistence via Cloudinary.
+    Dedicated service handling external AI Image synthesis, variant 
+    generation, and direct pipeline persistence via Cloudinary.
     """
 
     def __init__(self) -> None:
-        # Pulling OPENAI_API_KEY to avoid modifying core.py, 
-        # but this will be used for the Hugging Face API test.
-        self.api_key: Optional[str] = getattr(settings, "OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+        # Replicate API Key 
+        self.api_key: Optional[str] = getattr(settings, "REPLICATE_API_TOKEN", os.getenv("REPLICATE_API_TOKEN"))
         
-        # Test endpoint target: Stability AI Model on Hugging Face Inference API
-        self.hf_model_url: str = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3-medium-diffusers"
-        
-        # Verify Cloudinary configuration status
         if not getattr(settings, "CLOUDINARY_URL", os.getenv("CLOUDINARY_URL")):
-            logger.critical("CRITICAL: CLOUDINARY_URL is missing. Media uploads will fail.")
+            logger.critical("CRITICAL: CLOUDINARY_URL is missing.")
 
     async def generate_custom_furniture_image(
         self, 
         prompt: str, 
         user_id: int, 
+        base_image_url: str,
         product_context: Optional[str] = None
     ) -> str:
         """
-        Orchestrates the creation of custom design imagery:
-        1. Submits refined descriptive text to Hugging Face Inference API.
-        2. Directly receives and streams the response binary image bytes.
-        3. Uploads the buffer straight to Cloudinary under a specialized directory structure.
-        4. Returns the production-ready HTTPS delivery URL.
+        Executes a non-blocking Image-to-Image AI generation using FLUX-2-Pro
+        on Replicate, persisting the result to Cloudinary.
         """
         if not self.api_key:
-            logger.error("AI service failure: OPENAI_API_KEY is not defined in system environment.")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="API Key is missing or unconfigured."
+                detail="AI customization system is temporarily offline (Configuration missing)."
             )
 
-        # Build clean structural prompt matching the luxury Rocky Trendy Realities aesthetic
-        base_context = product_context or "Modern Home Finishes"
+        # Refined prompt for Flux-2-Pro to ensure the furniture context remains intact
         refined_prompt = (
-            f"High-end luxury furniture design, photorealistic, professional interior architecture photography, "
-            f"studio lighting, premium catalog style. Item context: {base_context}. "
-            f"User customization adjustments: {prompt}. "
-            f"Clean, neutral background emphasizing the materials and textures."
+            f"Change the material, color, and style of the furniture to: {prompt}. "
+            f"Maintain the exact original background, room setting, and aspect ratio. "
+            f"High-end studio product photography."
         )
 
-        logger.info(f"Initiating Hugging Face Stability generation pipeline for user ID {user_id}...")
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                # 1. Request image bytes from Hugging Face Inference Endpoint
-                ai_response = await client.post(
-                    self.hf_model_url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "inputs": refined_prompt,
-                        "parameters": {
-                            "negative_prompt": "blurry, low quality, distorted, extra limbs, text, watermark",
-                            "guidance_scale": 7.5
-                        }
-                    },
-                    timeout=60.0 
-                )
-                
-                # Check if model is loading
-                if ai_response.status_code == 503:
-                    logger.warning("Hugging Face model is currently loading into memory cluster...")
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="The Stability model is initializing on Hugging Face. Please try again in a few moments."
-                    )
-                
-                if ai_response.status_code != 200:
-                    logger.error(f"Hugging Face Gateway rejected query with code {ai_response.status_code}: {ai_response.text}")
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail="The AI generation network returned an invalid response."
-                    )
-                
-                # HF returns raw image payload byte stream directly
-                image_bytes = ai_response.content
-
-            except httpx.RequestError as exc:
-                logger.error(f"Network transport anomaly encountered during HF communication: {str(exc)}")
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Upstream HF inference architecture is unreachable."
-                )
-            except HTTPException:
-                raise
-            except Exception as exc:
-                logger.error(f"Unexpected fault processing Hugging Face synthesis context: {str(exc)}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to successfully process AI generation pipeline."
-                )
-
-        # 2. Offload cloud asset migration to secure storage bucket natively
         try:
-            # Wrap the raw binary image response safely into an in-memory stream structure
-            file_stream = io.BytesIO(image_bytes)
+            client = replicate.Client(api_token=self.api_key)
+
+            # 1. Trigger Flux-2-Pro asynchronously
+            output = await client.async_run(
+                "black-forest-labs/flux-2-pro",
+                input={
+                    "prompt": refined_prompt,
+                    "resolution": "1 MP",
+                    "aspect_ratio": "match_input_image",
+                    "input_images": [base_image_url],  # Flux requires this inside a list
+                    "output_format": "jpg",
+                    "output_quality": 80,              # Optimized for web speed & quality balance
+                    "safety_tolerance": 2,
+                    "prompt_upsampling": False
+                }
+            )
+
+            # Flux returns a FileOutput object. We verify it exists before proceeding.
+            if not output:
+                raise ValueError("Replicate (Flux-2-Pro) failed to yield a valid output image.")
             
-            # Execute standard execution call to Cloudinary uploader wrapper using custom storage pathing
+            # Extract the raw string URL from the FileOutput object
+            ai_generated_url = str(output.url)
+
+        except Exception as ai_err:
+            logger.error(f"Replicate API processing exception occurred: {str(ai_err)}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The AI image engine failed to process the request."
+            )
+
+        # =========================================================
+        # CLOUDINARY MIGRATION PIPELINE (Unchanged & Async)
+        # =========================================================
+        try:
+            # We use httpx to download the generated image asynchronously to avoid blocking the event loop
+            async with httpx.AsyncClient() as http_client:
+                image_response = await http_client.get(ai_generated_url, timeout=20.0)
+                image_response.raise_for_status()
+                image_bytes = image_response.content
+
+            file_stream = io.BytesIO(image_bytes)
+
+            # Upload the bytes to Cloudinary
             upload_result = cloudinary.uploader.upload(
                 file_stream,
-                folder="rtr_ai_customizer",
-                tags=["hf_generated", "stability_test", f"user_{user_id}"],
+                folder="rtr_custom_variants",
                 public_id=f"custom_{user_id}_{int(datetime.utcnow().timestamp())}",
                 overwrite=True,
                 resource_type="image"
@@ -147,14 +122,12 @@ class AIService:
             if not secure_url:
                 raise ValueError("Cloudinary upload did not resolve into a verified secure URL path.")
 
-            # Record a structured audit trail log of the event sequence
             log_action(
                 action="ai_asset_generated",
                 actor=f"user_{user_id}",
-                metadata={"cloudinary_url": secure_url, "prompt_length": len(prompt)}
+                metadata={"cloudinary_url": secure_url, "model": "flux-2-pro"}
             )
 
-            # 3. Supply direct verified cloud url to the application router framework
             return secure_url
 
         except Exception as upload_err:
@@ -167,10 +140,5 @@ class AIService:
 # =========================================================
 # SYSTEM DEPENDENCY INJECTION ENGINE
 # =========================================================
-
 async def get_ai_service() -> AIService:
-    """
-    FastAPI route dependency manager supplying non-blocking instance validation.
-    Usage in router: ai: AIService = Depends(get_ai_service)
-    """
     return AIService()

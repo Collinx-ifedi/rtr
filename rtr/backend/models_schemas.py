@@ -3,6 +3,7 @@
 # Rocky Trendy Realities - Physical Furniture, AI Customizer, & CMS
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Optional, List, Any, Dict
 
@@ -12,7 +13,7 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
-    Float,
+    Numeric,
     ForeignKey,
     Enum as SQLEnum,
     Text,
@@ -71,6 +72,7 @@ class OrderStatus(str, Enum):
 class PaymentMethod(str, Enum):
     PAYSTACK = "paystack"
     WALLET = "wallet"
+    WHATSAPP = "whatsapp"  # <-- Added WhatsApp checkout path
 
 class AdminRole(str, Enum):
     SUPERADMIN = "superadmin"
@@ -90,7 +92,7 @@ class BannerType(str, Enum):
     HERO = "hero"
     ADVERT = "advert"
     LOGO = "logo"
-    FLOATING = "floating"  # <-- Added to natively support floating hero graphics
+    FLOATING = "floating"
 
 # ======================================================
 # AUTH & USER MODELS
@@ -102,7 +104,7 @@ class Admin(Base, TimestampMixin):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=True) 
-    password_hash = Column(Text, nullable=False)
+    password_hash = Column(Text, nullable=False) # Note: Stores raw yaml credential per configuration
     role = Column(SQLEnum(AdminRole), default=AdminRole.ADMIN, nullable=False)
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime, nullable=True)
@@ -129,8 +131,8 @@ class User(Base, TimestampMixin):
     otp_expiry = Column(DateTime, nullable=True)
     two_factor_enabled = Column(Boolean, default=False)
 
-    # Wallet
-    balance = Column(Float, default=0.0, nullable=False)
+    # Wallet (Upgraded to high-precision Numeric)
+    balance = Column(Numeric(12, 2), default=Decimal('0.00'), nullable=False)
 
     # Relationships
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
@@ -179,8 +181,9 @@ class Product(Base, TimestampMixin, SoftDeleteMixin):
     product_category = Column(SQLEnum(ProductCategory), default=ProductCategory.DECOR, nullable=False, index=True)
     description = Column(Text)
     
-    price = Column(Float, nullable=False, default=0.0)
-    old_price = Column(Float, nullable=True)
+    # Financials (Upgraded to high-precision Numeric)
+    price = Column(Numeric(12, 2), nullable=False, default=Decimal('0.00'))
+    old_price = Column(Numeric(12, 2), nullable=True)
     badge = Column(String(50), nullable=True)
     
     quantity = Column(Integer, default=0, nullable=False)
@@ -234,7 +237,8 @@ class Order(Base, TimestampMixin):
     customer_phone = Column(String(50), nullable=False)
     shipping_address = Column(Text, nullable=False)
     
-    total_amount = Column(Float, nullable=False)
+    # Financials (Upgraded to high-precision Numeric)
+    total_amount = Column(Numeric(12, 2), nullable=False)
     
     status = Column(SQLEnum(OrderStatus), default=OrderStatus.PENDING, index=True)
     payment_method = Column(SQLEnum(PaymentMethod), default=PaymentMethod.PAYSTACK)
@@ -255,7 +259,9 @@ class OrderItem(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     
     quantity = Column(Integer, default=1, nullable=False)
-    unit_price_at_purchase = Column(Float, nullable=False) 
+    
+    # Financials (Upgraded to high-precision Numeric)
+    unit_price_at_purchase = Column(Numeric(12, 2), nullable=False) 
     
     # Catalog snapshot in case product is modified or deleted later
     product_name_snapshot = Column(String(255), nullable=True)
@@ -275,7 +281,9 @@ class Transaction(Base, TimestampMixin):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     order_id = Column(Integer, ForeignKey("orders.id"))
-    amount = Column(Float, nullable=False)
+    
+    # Financials (Upgraded to high-precision Numeric)
+    amount = Column(Numeric(12, 2), nullable=False)
     currency = Column(String(10), default="NGN")
     tx_hash = Column(String(255))
     status = Column(String(50), default="confirmed")
@@ -327,7 +335,7 @@ class UserResponse(ORMBase):
     full_name: Optional[str]
     phone: Optional[str]
     country: Optional[str]
-    balance: float
+    balance: Decimal
     is_verified: bool
     is_banned: bool
     avatar_url: Optional[str]
@@ -339,8 +347,8 @@ class ProductBaseSchema(BaseModel):
     product_category: ProductCategory = Field(default=ProductCategory.DECOR)
     description: Optional[str] = None
     
-    price: float = Field(..., gt=0)
-    old_price: Optional[float] = None
+    price: Decimal = Field(..., gt=0)
+    old_price: Optional[Decimal] = None
     badge: Optional[str] = None
     
     quantity: int = Field(0, ge=0)
@@ -355,7 +363,7 @@ class ProductCreateSchema(ProductBaseSchema):
 class ProductUpdateSchema(ProductBaseSchema):
     name: Optional[str] = None
     product_category: Optional[ProductCategory] = None
-    price: Optional[float] = None
+    price: Optional[Decimal] = None
     quantity: Optional[int] = None
     image_url: Optional[str] = None 
 
@@ -363,8 +371,8 @@ class ProductSchema(ORMBase):
     name: str
     product_category: ProductCategory
     description: Optional[str]
-    price: float
-    old_price: Optional[float]
+    price: Decimal
+    old_price: Optional[Decimal]
     badge: Optional[str]
     quantity: int
     delivery_duration: Optional[str]
@@ -414,7 +422,7 @@ class OrderItemResponse(BaseModel):
     product_name_snapshot: Optional[str]
     product_image_snapshot: Optional[str]
     quantity: int
-    unit_price_at_purchase: float
+    unit_price_at_purchase: Decimal
     is_customized: bool
     customization_notes: Optional[str]
     custom_image_url: Optional[str]
@@ -426,7 +434,7 @@ class OrderResponse(ORMBase):
     customer_email: str
     customer_phone: str
     shipping_address: str
-    total_amount: float
+    total_amount: Decimal
     status: OrderStatus
     payment_method: PaymentMethod
     payment_reference: Optional[str]
