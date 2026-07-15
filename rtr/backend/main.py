@@ -88,7 +88,7 @@ from .models_schemas import (
 
 # Dynamic absolute path resolution targeting the specific 'frontend' subfolder
 # Ensures 404s are prevented across production deployment environments
-BASE_DIR = Path(__file__).resolve().parent      
+BASE_DIR = Path(__file__).resolve().parent.parent      
 FRONTEND_DIR = BASE_DIR / "frontend"        
 UPLOAD_DIR = BASE_DIR / "temp_uploads"          
 
