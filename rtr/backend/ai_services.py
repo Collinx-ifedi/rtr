@@ -14,8 +14,8 @@ import cloudinary.uploader
 import replicate
 from fastapi import HTTPException, status
 
-from core import settings
-from utils import log_action
+from .core import settings
+from .utils import log_action
 
 # =========================================================
 # CONFIG & LOGGING
