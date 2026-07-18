@@ -161,3 +161,4 @@ def verify_webhook_signature(payload_bytes: bytes, signature: str) -> bool:
     
     # Use hmac.compare_digest to prevent timing attacks
     return hmac.compare_digest(computed_hash, signature)
+

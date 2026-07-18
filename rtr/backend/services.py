@@ -338,9 +338,12 @@ async def create_order_service(
             }
             
         else:
+            # The amount should be in the subunit of the supported currency[span_0](start_span)[span_0](end_span).
             amount_kobo = int(total_amount * 100)
             
             try:
+                # Initializing the transaction from the backend ensures you have full control of the transaction details[span_1](start_span)[span_1](end_span).
+                # Never call the Paystack API directly from your frontend to avoid exposing your secret key on the frontend[span_2](start_span)[span_2](end_span).
                 paystack_res = await initialize_transaction(
                     email=order_data.customer_email,
                     amount=amount_kobo,
@@ -384,6 +387,8 @@ async def create_order_service(
                 metadata={"payment_ref": payment_ref, "total": float(total_amount)}
             )
             
+            # The data object of the response contains an access_code parameter that's needed to complete the transaction[span_3](start_span)[span_3](end_span). 
+            # You should store this parameter and send it to your frontend[span_4](start_span)[span_4](end_span).
             return {
                 "checkout_url": checkout_url,
                 "order_reference": order_ref,

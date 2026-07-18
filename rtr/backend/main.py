@@ -214,7 +214,7 @@ ai_router = APIRouter(prefix="/api/ai", tags=["AI Design Studio"])
 @ai_router.post("/generate-customization")
 async def generate_design_customization(
     prompt: str = Body(..., embed=True),
-    base_image_url: str = Body(..., embed=True), # <-- Added to capture the product image explicitly
+    base_image_url: str = Body(..., embed=True), 
     product_context: Optional[str] = Body(None, embed=True),
     user: User = Depends(get_current_user),
     ai_service: AIService = Depends(get_ai_service)
@@ -223,7 +223,7 @@ async def generate_design_customization(
         secure_url = await ai_service.generate_custom_furniture_image(
             prompt=prompt,
             user_id=user.id,
-            base_image_url=base_image_url, # <-- Passed directly to the service
+            base_image_url=base_image_url,
             product_context=product_context
         )
         return {"status": "success", "image_url": secure_url}
@@ -365,7 +365,7 @@ async def checkout_route(
                 "status": "success",
                 "message": "Transaction initialized",
                 "authorization_url": result.get("authorization_url"),
-                "checkout_url": result.get("authorization_url"), # Kept for backward compatibility
+                "checkout_url": result.get("authorization_url"), 
                 "access_code": result.get("access_code"),
                 "reference": result.get("reference")
             }
