@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import update, delete, or_
+from sqlalchemy.exc import IntegrityError
 
 # IMPORT MODELS & SCHEMAS
 from .models_schemas import (
@@ -66,38 +67,61 @@ logger.setLevel(logging.INFO)
 async def create_user_service(db: AsyncSession, email: str, password: str, country: str) -> User:
     """Registers a new user and triggers email verification via secure OTP."""
     email_clean = email.strip().lower()
+    hashed = hash_password(password)
     
     query = select(User).where(User.email == email_clean)
     result = await db.execute(query)
     existing_user = result.scalar_one_or_none()
     
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An account with this email address already exists."
+        if existing_user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An account with this email address already exists."
+            )
+        else:
+            # Overwrite unverified pending account safely
+            existing_user.password_hash = hashed
+            existing_user.country = country
+            user_record = existing_user
+    else:
+        user_record = User(
+            email=email_clean,
+            password_hash=hashed,
+            country=country,
+            is_verified=False,
+            balance=Decimal('0.00')
         )
+        db.add(user_record)
         
-    hashed = hash_password(password)
-    
-    new_user = User(
-        email=email_clean,
-        password_hash=hashed,
-        country=country,
-        is_verified=False,
-        balance=Decimal('0.00')
-    )
-    
-    db.add(new_user)
-    await db.flush()
-    
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            # Catch race conditions where another transaction created the user
+            result = await db.execute(select(User).where(User.email == email_clean))
+            race_user = result.scalar_one_or_none()
+            if race_user and race_user.is_verified:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="An account with this email address already exists."
+                )
+            elif race_user:
+                race_user.password_hash = hashed
+                race_user.country = country
+                user_record = race_user
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                    detail="Database integrity error occurred during registration."
+                )
+
     otp_code = generate_otp()
     expires_at = datetime.utcnow() + timedelta(minutes=15)
     
-    await db.execute(
-        update(User)
-        .where(User.id == new_user.id)
-        .values(email_otp=otp_code, otp_expiry=expires_at)
-    )
+    # Utilizing ORM object state tracking instead of raw update statements for safety
+    user_record.email_otp = otp_code
+    user_record.otp_expiry = expires_at
     
     try:
         await send_email_otp(email_clean, otp_code, OTPPurpose.EMAIL_VERIFY)
@@ -105,8 +129,8 @@ async def create_user_service(db: AsyncSession, email: str, password: str, count
         logger.error(f"Failed to send activation email to user {email_clean}: {e}")
         
     await db.commit()
-    log_action("user_registered", actor=f"user_{new_user.id}", metadata={"email": email_clean})
-    return new_user
+    log_action("user_registered", actor=f"user_{user_record.id}", metadata={"email": email_clean})
+    return user_record
 
 async def verify_user_email_service(db: AsyncSession, email: str, otp: str) -> Dict[str, Any]:
     """Validates user's email address via the generated activation code."""
