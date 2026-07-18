@@ -347,7 +347,7 @@ async def checkout_route(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        result = await create_order_service(db, user.id, order_data)
+        result = await create_order_service(db, order_data, user_id=user.id)
         
         # Branch on response format: WhatsApp Redirect vs Paystack Gateway
         if isinstance(result, dict) and result.get("whatsapp_redirect"):
