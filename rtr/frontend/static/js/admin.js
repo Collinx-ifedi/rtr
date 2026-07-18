@@ -189,7 +189,7 @@
     const state = {
       auth: { token: null, admin: null },
       products: [], orders: [], customers: [], analytics: null,
-      heroes: [], campaigns: [], banners: [],
+      heroes: [], banners: [],
       ui: { sidebarOpen: false, loading: false },
       cache: {},
     };
@@ -669,7 +669,7 @@
     bindQuickActions() {
       $$('[data-quick]').forEach((btn) => on(btn, 'click', () => {
         const to = btn.dataset.quick;
-        const routes = { 'add-product': 'admin-products.html', 'orders': 'admin-dashboard.html', 'banner': 'admin-content.html', 'campaign': 'admin-content.html' };
+        const routes = { 'add-product': 'admin-products.html', 'orders': 'admin-dashboard.html', 'banner': 'admin-content.html' };
         if (routes[to]) location.href = routes[to];
       }));
     },
@@ -1437,153 +1437,6 @@
   };
 
   /* ==============================================================
-     EMAIL CLIENT MODULE
-     ============================================================== */
-  const EmailModule = {
-    templates: [
-      { id: 'promo', icon: 'gift', name: 'Promotion', subject: 'Exclusive Offer Just for You — RTR', desc: 'Announce sales and limited offers.', body: 'Dear [Client Name],\n\nWe have an exclusive offer for our valued customers! For a limited time, enjoy up to 30% off selected furniture and home finishes at Rocky Trendy Realities.\n\nShop now and transform your space. This offer expires on [Date].\n\nWarm regards,\nRocky Trendy Realities Team' },
-      { id: 'confirm', icon: 'check-circle', name: 'Order Confirmation', subject: 'Your RTR Order is Confirmed — [Order ID]', desc: 'Confirm a received order.', body: 'Dear [Client Name],\n\nThank you for your order! We are delighted to confirm we have received your purchase.\n\nOrder ID: [Order ID]\nProduct: [Product Name]\nTotal: [Amount]\n\nOur team will process your order shortly.\n\nWarm regards,\nRocky Trendy Realities' },
-      { id: 'delivery', icon: 'truck', name: 'Delivery Reminder', subject: 'Your RTR Delivery is Coming Soon!', desc: 'Notify customers of an upcoming delivery.', body: 'Dear [Client Name],\n\nGreat news! Your order [Order ID] is scheduled for delivery on [Delivery Date]. Please ensure someone is available to receive your item.\n\nWarm regards,\nRocky Trendy Realities' },
-      { id: 'review', icon: 'star', name: 'Review Request', subject: 'How did we do? — RTR', desc: 'Request a product review.', body: 'Dear [Client Name],\n\nWe hope you are enjoying your recent purchase! We would love to hear your feedback. Please take a moment to leave a review.\n\nKind regards,\nRTR Team' },
-    ],
-    state: { template: null, recipients: [], clients: [] },
-    async init() {
-      this.renderTemplates();
-      this.bindRecipients();
-      on($('#email-send'), 'click', () => this.send());
-      on($('#email-clear'), 'click', () => this.clear());
-      await this.loadClients();
-    },
-    renderTemplates() {
-      const grid = $('#template-grid'); if (!grid) return; clear(grid);
-      this.templates.forEach((t) => {
-        const card = el('div', { class: 'tpl-card', role: 'button', tabindex: '0' });
-        card.innerHTML = `<span class="tpl-icon"><i data-lucide="${t.icon}"></i></span><div class="tpl-name">${escapeHTML(t.name)}</div><div class="tpl-desc">${escapeHTML(t.desc)}</div>`;
-        const select = () => this.selectTemplate(t, card);
-        on(card, 'click', select);
-        on(card, 'keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } });
-        grid.appendChild(card);
-      });
-      refreshIcons();
-    },
-    selectTemplate(t, card) {
-      this.state.template = t;
-      $$('.tpl-card', $('#template-grid')).forEach((c) => c.classList.remove('selected'));
-      card.classList.add('selected');
-      const subj = $('#email-subject'); if (subj) subj.value = t.subject;
-      const body = $('#email-body'); if (body) body.textContent = t.body;
-    },
-    bindRecipients() {
-      const input = $('#recipient-input');
-      const chips = $('#recipient-chips');
-      if (chips) on(chips, 'click', () => input?.focus());
-      on(input, 'input', debounce((e) => this.suggest(e.target.value), 180));
-      on(input, 'keydown', (e) => {
-        if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
-        if ((e.key === 'Enter' || e.key === ',') && input.value.trim()) { e.preventDefault(); this.addRecipient(input.value.trim()); input.value = ''; this.suggest(''); }
-        if (e.key === 'Backspace' && !input.value && this.state.recipients.length) this.removeRecipient(this.state.recipients.length - 1);
-      });
-    },
-    async loadClients() {
-      const wrap = $('#client-list');
-      try {
-        const users = await API.users({ limit: 100 });
-        this.state.clients = users.map((u) => ({ name: u.full_name || u.email, email: u.email }));
-      } catch { this.state.clients = (Store.get('customers') || []).map((u) => ({ name: u.full_name || u.email, email: u.email })); }
-      const label = $('#client-count-label'); if (label) label.textContent = `${this.state.clients.length} clients`;
-      if (!wrap) return; clear(wrap);
-      if (!this.state.clients.length) { wrap.innerHTML = UI.empty('users', 'No clients yet', ''); refreshIcons(); return; }
-      this.state.clients.forEach((c) => {
-        const item = el('div', { class: 'client-list-item' });
-        item.innerHTML = `<span class="customer-avatar">${Fmt.initials(c.name)}</span><div class="flex-1 min-w-0"><div class="customer-name truncate">${escapeHTML(c.name)}</div><div class="customer-email truncate">${escapeHTML(c.email)}</div></div><button class="btn btn-xs btn-ghost" data-add-client="${escapeHTML(c.email)}">Add</button>`;
-        on($('[data-add-client]', item), 'click', () => this.addRecipient(c.email));
-        wrap.appendChild(item);
-      });
-      Search.attach($('#client-search'), (q) => this.filterClients(q));
-    },
-    filterClients(q) {
-      q = q.toLowerCase();
-      $$('#client-list .client-list-item').forEach((item) => {
-        const txt = item.textContent.toLowerCase();
-        item.style.display = txt.includes(q) ? '' : 'none';
-      });
-    },
-    suggest(value) {
-      const box = $('#client-suggestions'); if (!box) return;
-      value = value.trim().toLowerCase();
-      if (!value) { box.style.display = 'none'; clear(box); return; }
-      const matches = this.state.clients.filter((c) => `${c.name} ${c.email}`.toLowerCase().includes(value) && !this.state.recipients.includes(c.email)).slice(0, 6);
-      clear(box);
-      if (!matches.length) { box.style.display = 'none'; return; }
-      matches.forEach((c) => { const s = el('div', { class: 'client-suggestion', text: `${c.name} · ${c.email}` }); on(s, 'click', () => { this.addRecipient(c.email); $('#recipient-input').value = ''; box.style.display = 'none'; }); box.appendChild(s); });
-      box.style.display = 'block';
-    },
-    addRecipient(email) {
-      email = email.trim();
-      if (!Validate.email(email)) { Notify.warning('Enter a valid email address'); return; }
-      if (this.state.recipients.includes(email)) return;
-      this.state.recipients.push(email); this.renderChips();
-    },
-    removeRecipient(i) { this.state.recipients.splice(i, 1); this.renderChips(); },
-    renderChips() {
-      const chips = $('#recipient-chips'); const input = $('#recipient-input'); if (!chips) return;
-      $$('.chip', chips).forEach((c) => c.remove());
-      this.state.recipients.forEach((email, i) => {
-        const chip = el('span', { class: 'chip' });
-        chip.innerHTML = `${escapeHTML(email)} <button type="button" aria-label="Remove ${escapeHTML(email)}">&times;</button>`;
-        on($('button', chip), 'click', () => this.removeRecipient(i));
-        chips.insertBefore(chip, input);
-      });
-    },
-    send() {
-      if (!this.state.recipients.length) { Notify.warning('Add at least one recipient'); return; }
-      const subject = $('#email-subject')?.value?.trim();
-      const body = $('#email-body')?.textContent?.trim();
-      if (!subject || !body) { Notify.warning('Subject and message are required'); return; }
-      // The backend exposes transactional email internally; this queues the compose client-side.
-      Notify.success(`Email queued for ${this.state.recipients.length} recipient(s)`);
-      Log.info('email compose', { recipients: this.state.recipients, subject });
-      this.clear();
-    },
-    clear() {
-      this.state.recipients = []; this.renderChips();
-      const subj = $('#email-subject'); if (subj) subj.value = '';
-      const body = $('#email-body'); if (body) body.textContent = '';
-      $$('.tpl-card.selected').forEach((c) => c.classList.remove('selected'));
-      this.state.template = null;
-    },
-  };
-
-  /* ==============================================================
-     CAMPAIGN MODULE
-     ============================================================== */
-  const CampaignModule = {
-    init() {
-      this.wrap = $('#campaign-list'); if (!this.wrap) return;
-      this.items = Storage.get('rtr_campaigns', []);
-      on($('#campaign-create'), 'click', () => this.create());
-      this.render();
-    },
-    create() {
-      const name = prompt('Campaign name');
-      if (!name) return;
-      this.items.unshift({ id: Date.now(), name: sanitizeInput(name, 120), status: 'scheduled', created: Date.now(), sent: 0, opens: 0, clicks: 0 });
-      Storage.set('rtr_campaigns', this.items); this.render(); Notify.success('Campaign created');
-    },
-    render() {
-      clear(this.wrap);
-      if (!this.items.length) { this.wrap.innerHTML = UI.empty('megaphone', 'No campaigns yet', 'Create your first marketing campaign.'); refreshIcons(); return; }
-      this.items.forEach((c) => {
-        const card = el('div', { class: 'campaign-card' });
-        card.innerHTML = `
-          <div class="campaign-head"><div><div class="campaign-name">${escapeHTML(c.name)}</div><div class="campaign-meta">Created ${Fmt.relative(c.created)}</div></div><span class="badge ${c.status}">${Fmt.titleCase(c.status)}</span></div>
-          <div class="campaign-stats"><div class="campaign-stat"><div class="cs-val">${Fmt.number(c.sent)}</div><div class="cs-label">Sent</div></div><div class="campaign-stat"><div class="cs-val">${Fmt.number(c.opens)}</div><div class="cs-label">Opens</div></div><div class="campaign-stat"><div class="cs-val">${Fmt.number(c.clicks)}</div><div class="cs-label">Clicks</div></div></div>`;
-        this.wrap.appendChild(card);
-      });
-    },
-  };
-
-  /* ==============================================================
      SHARED UI SNIPPETS
      ============================================================== */
   const UI = {
@@ -1640,7 +1493,7 @@
   const PAGE_MODULES = {
     dashboard: [DashboardModule, AnalyticsModule, OrdersModule, CustomersModule],
     products: [ProductsModule, ProductEditor, OrdersModule, CustomersModule, InventoryModule],
-    content: [HeroModule, EmailModule, CampaignModule],
+    content: [HeroModule],
   };
 
   const App = {
