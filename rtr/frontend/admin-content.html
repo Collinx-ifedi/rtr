@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0D0500" />
-  <meta name="description" content="Manage storefront hero banners, floating imagery, email campaigns and client outreach for Rocky Trendy Realities." />
-  <title>Content &amp; Email · RTR Admin</title>
+  <meta name="description" content="Manage storefront hero banners for Rocky Trendy Realities." />
+  <title>Content · RTR Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
@@ -29,7 +29,7 @@
         </a>
         <div class="sb-section">Engagement</div>
         <a class="sb-link" data-href="admin-content.html" href="admin-content.html">
-          <i data-lucide="layout-template"></i><span>Content &amp; Email</span>
+          <i data-lucide="layout-template"></i><span>Content</span>
         </a>
       </nav>
       <div class="sb-foot">
@@ -49,15 +49,13 @@
       <header class="topbar">
         <div class="topbar-left">
           <button class="icon-btn mob-toggle" aria-label="Toggle menu"><i data-lucide="menu"></i></button>
-          <h1 class="topbar-title">Content &amp; Email</h1>
+          <h1 class="topbar-title">Content</h1>
         </div>
       </header>
 
       <main class="content">
         <div class="tabs" role="tablist">
           <button class="tab active" data-tab="panel-hero" role="tab">Hero &amp; Banners</button>
-          <button class="tab" data-tab="panel-email" role="tab">Email Studio</button>
-          <button class="tab" data-tab="panel-campaigns" role="tab">Campaigns</button>
         </div>
 
         <!-- ===================== HERO & BANNERS ===================== -->
@@ -130,98 +128,12 @@
                 </div>
               </div>
 
-              <!-- Replace your existing Floating Images card with this: -->
-<div class="card">
-  <div class="card-head">
-    <div class="card-title">Floating Images</div>
-    <div class="flex gap-2">
-      <!-- Hidden file input to pick multiple floating images -->
-      <input type="file" id="float-img-input" accept="image/*" multiple style="display: none;" />
-      <button class="btn btn-ghost btn-xs" id="add-float-img" type="button">
-        <i data-lucide="plus"></i>Add
-      </button>
-      <!-- New Save button -->
-      <button class="btn btn-primary btn-xs" id="save-float-img" type="button">
-        <i data-lucide="save"></i>Save
-      </button>
-    </div>
-  </div>
-  <div class="card-body">
-    <div id="float-img-list" class="float-img-list grid gap-2"></div>
-  </div>
-</div>
-
-          <div class="card mt-3">
-            <div class="card-head"><div class="card-title">Existing Banners</div></div>
-            <div class="card-body"><div id="banner-list" class="grid gap-2"></div></div>
-          </div>
-        </div>
-
-        <!-- ===================== EMAIL STUDIO ===================== -->
-        <div class="tab-panel" id="panel-email" role="tabpanel">
-          <div class="two-col-catalog">
-            <!-- COMPOSER -->
-            <section>
-              <div class="section-head">
-                <div>
-                  <div class="section-title">Templates</div>
-                  <div class="section-sub">Pick a starting point, then customize</div>
-                </div>
+              <div class="card mt-3">
+                <div class="card-head"><div class="card-title">Existing Banners</div></div>
+                <div class="card-body"><div id="banner-list" class="grid gap-2"></div></div>
               </div>
-              <div class="template-grid" id="template-grid"></div>
-
-              <div class="email-compose">
-                <div class="form-group">
-                  <label>Recipients</label>
-                  <div class="client-chips" id="recipient-chips">
-                    <input id="recipient-input" type="text" placeholder="Type an email and press Enter…" aria-label="Add recipient" />
-                  </div>
-                  <div class="client-suggestions" id="client-suggestions" style="display:none"></div>
-                </div>
-                <div class="form-group">
-                  <label for="email-subject">Subject</label>
-                  <input id="email-subject" type="text" placeholder="Subject line…" maxlength="200" />
-                </div>
-                <div class="form-group">
-                  <label for="email-body">Message</label>
-                  <div class="email-body-area" id="email-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Email body"></div>
-                </div>
-                <div class="flex justify-end gap-2">
-                  <button class="btn btn-ghost" id="email-clear"><i data-lucide="eraser"></i>Clear</button>
-                  <button class="btn btn-primary" id="email-send"><i data-lucide="send"></i>Send Email</button>
-                </div>
-              </div>
-            </section>
-
-            <!-- CLIENT DIRECTORY -->
-            <aside>
-              <div class="card">
-                <div class="card-head">
-                  <div class="card-title">Clients</div>
-                  <span class="badge no-dot neutral" id="client-count-label">0 clients</span>
-                </div>
-                <div class="card-body">
-                  <div class="search-input-wrap mb-2">
-                    <i data-lucide="search"></i>
-                    <input class="search-input" id="client-search" type="search" placeholder="Search clients…" aria-label="Search clients" />
-                  </div>
-                </div>
-                <div id="client-list"></div>
-              </div>
-            </aside>
-          </div>
-        </div>
-
-        <!-- ===================== CAMPAIGNS ===================== -->
-        <div class="tab-panel" id="panel-campaigns" role="tabpanel">
-          <div class="section-head">
-            <div>
-              <div class="section-title">Marketing Campaigns</div>
-              <div class="section-sub">Track sends, opens and clicks</div>
             </div>
-            <button class="btn btn-primary btn-sm" id="campaign-create"><i data-lucide="plus"></i>New Campaign</button>
           </div>
-          <div class="three-col" id="campaign-list"></div>
         </div>
       </main>
     </div>
