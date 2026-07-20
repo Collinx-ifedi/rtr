@@ -72,7 +72,10 @@ async def initialize_transaction(
             response = await client.post(url, json=payload, headers=_get_headers(), timeout=15.0)
             response.raise_for_status()
             data = response.json()
-            return data.get("data", {})
+            
+            # FIX APPLIED: Return the full data payload instead of data.get("data", {})
+            return data
+            
         except httpx.HTTPStatusError as e:
             logger.error(f"Paystack Initialize Error: {e.response.text}")
             raise HTTPException(
@@ -161,4 +164,3 @@ def verify_webhook_signature(payload_bytes: bytes, signature: str) -> bool:
     
     # Use hmac.compare_digest to prevent timing attacks
     return hmac.compare_digest(computed_hash, signature)
-
