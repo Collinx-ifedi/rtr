@@ -536,6 +536,7 @@
     bars(container, data, { format = Fmt.moneyShort } = {}) {
       if (!container) return;
       clear(container);
+      const row = el('div', { class: 'chart-bars' });
       const max = Math.max(...data.map((d) => d.value), 1);
       data.forEach((d, i) => {
         const wrap = el('div', { class: 'chart-bar-wrap' });
@@ -543,9 +544,10 @@
         bar.appendChild(el('span', { class: 'chart-bar-tip', text: format(d.value) }));
         wrap.appendChild(bar);
         wrap.appendChild(el('span', { class: 'chart-label', text: d.label }));
-        container.appendChild(wrap);
+        row.appendChild(wrap);
         requestAnimationFrame(() => setTimeout(() => { bar.style.height = `${(d.value / max) * 100}%`; }, i * 45));
       });
+      container.appendChild(row);
     },
     donut(container, segments) {
       if (!container) return;
@@ -649,12 +651,27 @@
       if (!CONFIG.FEATURES.charts) return;
       const rev = $('#rev-chart');
       if (rev) {
-        // Derive a simple 7-day trend from recent orders if available, else neutral scaffold
-        const orders = Store.get('orders') || [];
-        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const buckets = days.map((d) => ({ label: d, value: 0 }));
-        orders.forEach((o) => { const idx = (new Date(o.created_at).getDay() + 6) % 7; if (buckets[idx]) buckets[idx].value += Number(o.total_amount || 0); });
-        if (buckets.every((b) => b.value === 0)) days.forEach((_, i) => (buckets[i].value = 0));
+        // Fetch independently rather than reading Store.get('orders') — that store is
+        // only populated once loadRecentOrders()'s own await resolves, and since both
+        // run concurrently via Promise.allSettled in init(), reading it here raced and
+        // was always empty, so the chart rendered with every bucket at zero.
+        let orders = [];
+        try { orders = await API.orders({ limit: 100 }); } catch (e) { Log.warn('revenue chart orders', e.message); }
+
+        // Bucket by actual calendar day (today and the 6 days before it) to match the
+        // "Last 7 days" label — grouping by weekday name alone would silently merge
+        // orders from different weeks into the same bar.
+        const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const buckets = Array.from({ length: 7 }, (_, i) => {
+          const d = new Date(today); d.setDate(d.getDate() - (6 - i));
+          return { label: dayLabels[d.getDay()], date: d, value: 0 };
+        });
+        orders.forEach((o) => {
+          const created = new Date(o.created_at); created.setHours(0, 0, 0, 0);
+          const bucket = buckets.find((b) => b.date.getTime() === created.getTime());
+          if (bucket) bucket.value += Number(o.total_amount || 0);
+        });
         Charts.bars(rev, buckets);
       }
       const donut = $('#category-donut');
