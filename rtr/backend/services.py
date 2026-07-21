@@ -4,6 +4,7 @@
 
 import logging
 import os
+import json
 import yaml
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -51,7 +52,7 @@ from .core import (
 )
 
 # IMPORT PAYSTACK
-from .paystack import initialize_transaction
+from .paystack import initialize_transaction, verify_transaction, verify_webhook_signature
 
 # =========================================================
 # CONFIG & LOGGING
@@ -348,6 +349,11 @@ async def create_order_service(
                     email=order_data.customer_email,
                     amount=amount_kobo,
                     reference=order_ref,
+                    # Points at the storefront's order history page — client.js's
+                    # OrdersModule reads ?reference= from here and calls
+                    # GET /api/orders/verify-callback on this API to reconcile
+                    # before rendering, so the order shows its real status right away.
+                    callback_url=f"{settings.FRONTEND_URL}/orders.html",
                     metadata={"user_id": user_id, "phone": order_data.customer_phone}
                 )
             except Exception as err:
@@ -545,3 +551,107 @@ async def process_admin_order_action(
         return {"status": "rejected", "detail": "Order marked as rejected."}
         
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid fulfillment action.")
+
+async def _release_reserved_stock(db: AsyncSession, order: Order) -> None:
+    """Returns inventory reserved at checkout back to stock when a payment doesn't complete."""
+    for item in order.items:
+        prod_query = select(Product).where(Product.id == item.product_id).with_for_update()
+        prod_res = await db.execute(prod_query)
+        product = prod_res.scalar_one_or_none()
+        if product:
+            product.quantity += item.quantity
+
+async def process_paystack_webhook(
+    db: AsyncSession,
+    payload_bytes: bytes,
+    signature: Optional[str]
+) -> Dict[str, str]:
+    """
+    Reconciles order status against real Paystack events. Paystack only sends webhook
+    events for successful charges (failed/abandoned attempts never fire a webhook), so
+    this handles 'charge.success'; failed/abandoned/cancelled payments are caught
+    separately by process_paystack_callback when the customer is redirected back.
+    """
+    if not verify_webhook_signature(payload_bytes, signature or ""):
+        logger.warning("Rejected Paystack webhook: signature verification failed.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature.")
+
+    try:
+        event = json.loads(payload_bytes)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed webhook payload.")
+
+    event_type = event.get("event")
+    data = event.get("data") or {}
+    reference = data.get("reference")
+
+    if event_type != "charge.success" or not reference:
+        return {"status": "ignored", "detail": f"Event '{event_type}' not actionable."}
+
+    order_query = select(Order).where(Order.payment_reference == reference).options(selectinload(Order.items))
+    order_result = await db.execute(order_query)
+    order = order_result.scalar_one_or_none()
+
+    if not order:
+        logger.warning(f"Webhook 'charge.success' received for unknown reference '{reference}'.")
+        return {"status": "ignored", "detail": "No matching order for this reference."}
+
+    # Idempotency guard: webhooks can be delivered more than once, and the customer's
+    # own redirect (process_paystack_callback) may have already reconciled this order.
+    if order.status == OrderStatus.PENDING:
+        order.status = OrderStatus.PAID
+        order.updated_at = datetime.utcnow()
+
+        tx_query = select(Transaction).where(Transaction.tx_hash == reference)
+        tx_result = await db.execute(tx_query)
+        transaction = tx_result.scalar_one_or_none()
+        if transaction:
+            transaction.status = "confirmed"
+
+        await db.commit()
+        log_action("order_paid_webhook", actor="paystack", order_reference=order.order_reference)
+
+    return {"status": "processed", "detail": f"Order {order.order_reference} reconciled as paid."}
+
+async def process_paystack_callback(db: AsyncSession, reference: str) -> Dict[str, str]:
+    """
+    Called when the customer is redirected back from Paystack's checkout page —
+    whether they completed, cancelled, or the payment failed. Paystack doesn't send
+    a webhook for anything except success, so this verify call is what catches
+    cancellations and failures and moves the order out of 'pending'.
+    """
+    order_query = select(Order).where(Order.payment_reference == reference).options(selectinload(Order.items))
+    order_result = await db.execute(order_query)
+    order = order_result.scalar_one_or_none()
+
+    if not order:
+        return {"status": "not_found", "order_reference": "", "detail": "No order matches this payment reference."}
+
+    # Idempotency guard: if a webhook already reconciled this order, don't re-process.
+    if order.status != OrderStatus.PENDING:
+        return {"status": order.status.value, "order_reference": order.order_reference, "detail": "Already reconciled."}
+
+    verify_result = await verify_transaction(reference)
+    ps_status = (verify_result or {}).get("status")
+
+    tx_query = select(Transaction).where(Transaction.tx_hash == reference)
+    tx_result = await db.execute(tx_query)
+    transaction = tx_result.scalar_one_or_none()
+
+    if ps_status == "success":
+        order.status = OrderStatus.PAID
+        if transaction:
+            transaction.status = "confirmed"
+        log_action("order_paid_callback", actor="paystack", order_reference=order.order_reference)
+    else:
+        # Covers 'failed', 'abandoned' (customer cancelled), 'reversed', and anything else —
+        # release the stock that was reserved at checkout since the order never got paid for.
+        await _release_reserved_stock(db, order)
+        order.status = OrderStatus.FAILED
+        if transaction:
+            transaction.status = "failed"
+        log_action("order_failed_callback", actor="paystack", order_reference=order.order_reference, metadata={"paystack_status": ps_status})
+
+    order.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"status": order.status.value, "order_reference": order.order_reference, "detail": f"Paystack reported '{ps_status}'."}

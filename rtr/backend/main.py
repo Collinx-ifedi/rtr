@@ -56,6 +56,8 @@ from .services import (
     create_order_service,
     create_banner_service,
     process_admin_order_action,
+    process_paystack_webhook,
+    process_paystack_callback,
     moderate_user_service
 )
 from .ai_services import get_ai_service, AIService
@@ -389,6 +391,43 @@ async def get_user_orders(user: User = Depends(get_current_user), db: AsyncSessi
     )
     result = await db.execute(stmt)
     return result.scalars().all()
+
+@order_router.post("/webhook", include_in_schema=False)
+async def paystack_webhook_route(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Paystack calls this directly (no auth) whenever a charge succeeds. Signature is
+    verified against the raw request body before anything is trusted.
+    Configure this URL — wherever this backend is publicly reachable, e.g.
+    https://your-backend-domain.com/api/orders/webhook — in the Paystack dashboard.
+    """
+    raw_body = await request.body()
+    signature = request.headers.get("x-paystack-signature")
+    result = await process_paystack_webhook(db, raw_body, signature)
+    # Always acknowledge with 200 once signature-verified, per Paystack's retry policy,
+    # so an "ignored" (unhandled event type) doesn't trigger needless webhook retries.
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result)
+
+@order_router.get("/verify-callback")
+async def paystack_verify_callback_route(
+    reference: Optional[str] = None,
+    trxref: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Called by the storefront's own order-status page — NOT by Paystack directly.
+    Paystack's callback_url (set in create_order_service) points at that storefront
+    page, which reads the ?reference=/&trxref= query param it was redirected with
+    and calls this endpoint to get the reconciled status. Covers success, failure,
+    AND cancellation, since Paystack only sends a webhook for successful charges.
+    """
+    ref = reference or trxref
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing payment reference.")
+
+    result = await process_paystack_callback(db, ref)
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.get("detail"))
+    return result
 
 
 # --- E. ADMINISTRATIVE ROUTER ---

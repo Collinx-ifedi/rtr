@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     ENV: str = Field(default="production")
     DEBUG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
+
+    # Base URL of the frontend — used to build the Paystack callback_url so customers
+    # land back on the storefront after paying, cancelling, or a failed charge.
+    FRONTEND_URL: str = Field(default="http://localhost:3000")
     
     # Admin Seeding Strings
     ADMIN_USERNAMES: Optional[str] = Field(default=None)
