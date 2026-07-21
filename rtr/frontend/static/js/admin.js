@@ -1141,6 +1141,25 @@
       this.state.filtered.forEach((o) => b.appendChild(this.fullRow(o)));
       refreshIcons();
     },
+    renderSkeleton() {
+      const b = this.tbody; if (!b) return;
+      clear(b);
+      for (let i = 0; i < 6; i++) {
+        const tr = el('tr');
+        tr.innerHTML = `
+          <td><div class="skeleton skeleton-text short"></div></td>
+          <td><div class="skeleton skeleton-text"></div></td>
+          <td><div class="skeleton skeleton-text"></div></td>
+          <td><div class="skeleton skeleton-text short"></div></td>
+          <td><div class="skeleton skeleton-text short"></div></td>
+          <td class="hide-mobile"><div class="skeleton skeleton-text"></div></td>
+          <td class="hide-mobile"><div class="skeleton skeleton-text short"></div></td>
+          <td><div class="skeleton skeleton-text short"></div></td>
+          <td><div class="skeleton skeleton-text short"></div></td>
+          <td></td>`;
+        b.appendChild(tr);
+      }
+    },
     fullRow(o) {
       const tr = el('tr');
       const item = (o.items && o.items[0]) || {};
@@ -1154,7 +1173,7 @@
         <td class="truncate hide-mobile" style="max-width:160px">${escapeHTML(o.shipping_address || '—')}</td>
         <td class="hide-mobile">${escapeHTML(o.customer_phone || '—')}</td>
         <td class="text-muted fs-xs">${Fmt.date(o.created_at)}</td>
-        <td><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span></td>
+        <td><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span><div class="fs-xs text-muted mt-1">${this.channelLabel(o.payment_method)}</div></td>
         <td><div class="row-actions"><button type="button" class="icon-btn tooltip" data-tip="View" data-view-order="${o.id}" onclick="window.RTR_viewOrder(${o.id})"><i data-lucide="eye"></i></button></div></td>`;
       return tr;
     },
@@ -1167,11 +1186,12 @@
         <td class="truncate" style="max-width:150px">${escapeHTML(item.product_name_snapshot || '—')}</td>
         <td class="td-strong">${Fmt.money(o.total_amount)}</td>
         <td class="text-muted fs-xs">${Fmt.date(o.created_at)}</td>
-        <td><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span></td>
+        <td><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span><div class="fs-xs text-muted mt-1">${this.channelLabel(o.payment_method)}</div></td>
         <td><button type="button" class="icon-btn tooltip" data-tip="View" data-view-order="${o.id}" onclick="window.RTR_viewOrder(${o.id})"><i data-lucide="eye"></i></button></td>`;
       return tr;
     },
     emptyRow(msg) { return UI.empty('shopping-bag', msg, ''); },
+    channelLabel(method) { return (method || '').toLowerCase() === 'whatsapp' ? 'via WhatsApp' : 'via Paystack'; },
     openDetail(o) {
       const modal = $('#order-modal'); if (!modal) { Notify.info(`Order ${o.order_reference || o.id}`); return; }
       $('#om-title').textContent = `Order ${o.order_reference || '#' + o.id}`;
@@ -1184,6 +1204,7 @@
         </div>`).join('') || '<p class="text-muted fs-sm">No line items recorded.</p>';
       body.innerHTML = `
         <div class="info-row"><span class="info-label">Status</span><span class="info-value"><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span></span></div>
+        <div class="info-row"><span class="info-label">Channel</span><span class="info-value">${(o.payment_method || '').toLowerCase() === 'whatsapp' ? 'WhatsApp' : 'Paystack'}</span></div>
         <div class="info-row"><span class="info-label">Customer</span><span class="info-value">${escapeHTML(o.customer_email || '—')}</span></div>
         <div class="info-row"><span class="info-label">Phone</span><span class="info-value">${escapeHTML(o.customer_phone || '—')}</span></div>
         <div class="info-row"><span class="info-label">Shipping</span><span class="info-value">${escapeHTML(o.shipping_address || '—')}</span></div>
