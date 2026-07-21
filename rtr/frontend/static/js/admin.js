@@ -5,45 +5,6 @@
    Pages: admin-dashboard.html · admin-products.html · admin-content.html
    Auto page detection via document.body.dataset.page
    ================================================================ */
-/* ================================================================
-   TEMPORARY DEBUG OVERLAY — remove once the issue is found.
-   Catches any JS error or unhandled promise rejection anywhere in
-   this file (or any script on the page) and shows it as a visible
-   red banner at the top of the screen, since mobile browsers don't
-   give easy access to the console.
-   ================================================================ */
-(() => {
-  const BUILD_TAG = 'DEBUG-BUILD-4';
-  const badge = document.createElement('div');
-  badge.id = '__build_badge';
-  badge.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:999999;background:#000;color:#0f0;padding:3px 8px;font:11px/1.3 monospace;border-radius:4px;opacity:0.85;';
-  badge.textContent = `admin.js: ${BUILD_TAG}`;
-  const mount = () => document.body && document.body.appendChild(badge);
-  if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
-
-  const showFatal = (msg) => {
-    let d = document.getElementById('__debug_overlay');
-    if (!d) {
-      d = document.createElement('div');
-      d.id = '__debug_overlay';
-      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#b91c1c;color:#fff;padding:10px 12px;font:12px/1.4 monospace;white-space:pre-wrap;max-height:45vh;overflow:auto;';
-      document.addEventListener('DOMContentLoaded', () => document.body.appendChild(d));
-      if (document.body) document.body.appendChild(d);
-    }
-    const line = document.createElement('div');
-    line.style.cssText = 'border-top:1px solid rgba(255,255,255,0.3);padding-top:6px;margin-top:6px;';
-    line.textContent = msg;
-    d.appendChild(line);
-  };
-  window.addEventListener('error', (e) => {
-    showFatal(`[JS ERROR] ${e.message}\nat ${e.filename}:${e.lineno}:${e.colno}`);
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    const r = e.reason;
-    showFatal(`[UNHANDLED PROMISE] ${(r && (r.stack || r.message)) || r}`);
-  });
-})();
-
 (() => {
   'use strict';
 
