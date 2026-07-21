@@ -13,6 +13,14 @@
    give easy access to the console.
    ================================================================ */
 (() => {
+  const BUILD_TAG = 'DEBUG-BUILD-4';
+  const badge = document.createElement('div');
+  badge.id = '__build_badge';
+  badge.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:999999;background:#000;color:#0f0;padding:3px 8px;font:11px/1.3 monospace;border-radius:4px;opacity:0.85;';
+  badge.textContent = `admin.js: ${BUILD_TAG}`;
+  const mount = () => document.body && document.body.appendChild(badge);
+  if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
+
   const showFatal = (msg) => {
     let d = document.getElementById('__debug_overlay');
     if (!d) {
@@ -1147,7 +1155,7 @@
         <td class="hide-mobile">${escapeHTML(o.customer_phone || '—')}</td>
         <td class="text-muted fs-xs">${Fmt.date(o.created_at)}</td>
         <td><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span></td>
-        <td><div class="row-actions"><button class="icon-btn tooltip" data-tip="View" data-view-order="${o.id}"><i data-lucide="eye"></i></button></div></td>`;
+        <td><div class="row-actions"><button type="button" class="icon-btn tooltip" data-tip="View" data-view-order="${o.id}" onclick="window.RTR_viewOrder(${o.id})"><i data-lucide="eye"></i></button></div></td>`;
       return tr;
     },
     compactRow(o) {
@@ -1160,7 +1168,7 @@
         <td class="td-strong">${Fmt.money(o.total_amount)}</td>
         <td class="text-muted fs-xs">${Fmt.date(o.created_at)}</td>
         <td><span class="badge ${(o.status || 'pending').toLowerCase()}">${Fmt.titleCase(o.status || 'pending')}</span></td>
-        <td><button class="icon-btn tooltip" data-tip="View" data-view-order="${o.id}"><i data-lucide="eye"></i></button></td>`;
+        <td><button type="button" class="icon-btn tooltip" data-tip="View" data-view-order="${o.id}" onclick="window.RTR_viewOrder(${o.id})"><i data-lucide="eye"></i></button></td>`;
       return tr;
     },
     emptyRow(msg) { return UI.empty('shopping-bag', msg, ''); },
@@ -1589,6 +1597,23 @@
   };
 
   // Expose a minimal namespace for debugging / inline hooks
+  // Bulletproof direct handler — works even if OrdersModule's delegated
+  // click listener never attached for some reason.
+  window.RTR_viewOrder = async (id) => {
+    try {
+      const cached = (OrdersModule.state.all || []).find((x) => x.id == id)
+        || (Store.get('orders') || []).find((x) => x.id == id);
+      if (cached) { OrdersModule.openDetail(cached); return; }
+      // Not cached anywhere yet — fetch it directly rather than doing nothing.
+      const orders = await API.orders({ limit: 100 });
+      const found = orders.find((x) => x.id == id);
+      if (found) { OrdersModule.openDetail(found); }
+      else { Notify.error(`Order #${id} not found.`); }
+    } catch (e) {
+      Notify.error(`Couldn't open order: ${e.message || 'unknown error'}`);
+    }
+  };
+
   window.RTR = Object.freeze({ API, Store, Auth, Notify, Modal, Drawer, EventBus, Fmt, CONFIG, Exporter, ProductEditor, ProductsModule, OrdersModule });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => App.init());
