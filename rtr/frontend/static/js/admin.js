@@ -1147,15 +1147,28 @@
         <div class="divider"></div>
         <div class="form-group"><label>Fulfillment note (emailed to customer)</label><textarea id="om-note" placeholder="e.g. Your order has shipped via GIG Logistics, tracking #…">${escapeHTML(o.fulfillment_note || '')}</textarea></div>`;
       const foot = $('#om-foot');
-      foot.innerHTML = `
-        <button class="btn btn-danger" data-order-action="reject" data-order-id="${o.id}"><i data-lucide="x"></i>Reject</button>
-        <button class="btn btn-ghost" data-order-action="ship" data-order-id="${o.id}"><i data-lucide="truck"></i>Mark Shipped</button>
-        <button class="btn btn-success" data-order-action="complete" data-order-id="${o.id}"><i data-lucide="check"></i>Complete</button>`;
+      const st = (o.status || 'pending').toLowerCase();
+      let actions = '';
+      if (st === 'pending') {
+        actions = `
+          <button class="btn btn-danger" data-order-action="cancel" data-order-id="${o.id}"><i data-lucide="x"></i>Cancel</button>
+          <button class="btn btn-success" data-order-action="confirm" data-order-id="${o.id}"><i data-lucide="check"></i>Confirm Order</button>`;
+      } else if (st === 'paid' || st === 'processing') {
+        actions = `
+          <button class="btn btn-danger" data-order-action="cancel" data-order-id="${o.id}"><i data-lucide="x"></i>Cancel</button>
+          <button class="btn btn-ghost" data-order-action="ship" data-order-id="${o.id}"><i data-lucide="truck"></i>Mark Shipped</button>
+          <button class="btn btn-success" data-order-action="complete" data-order-id="${o.id}"><i data-lucide="check"></i>Complete</button>`;
+      } else if (st === 'shipped') {
+        actions = `<button class="btn btn-success" data-order-action="complete" data-order-id="${o.id}"><i data-lucide="check"></i>Mark Delivered</button>`;
+      } else {
+        actions = `<p class="text-muted fs-sm">This order is ${Fmt.titleCase(st)} — no further actions available.</p>`;
+      }
+      foot.innerHTML = actions;
       Modal.open('order-modal');
       refreshIcons();
     },
     async confirmAction(id, action) {
-      const labels = { complete: 'complete', reject: 'reject', ship: 'mark as shipped' };
+      const labels = { confirm: 'confirm', cancel: 'cancel', complete: 'complete', reject: 'reject', ship: 'mark as shipped' };
       const note = $('#om-note')?.value || '';
       if (!confirm(`Are you sure you want to ${labels[action] || action} this order?`)) return;
       try {
@@ -1499,11 +1512,25 @@
   const App = {
     async init() {
       Log.time('boot');
-      // Core (all pages)
-      Auth.hydrate();
-      Modal.init(); Drawer.init(); Dropdown.init(); Tooltip.init();
-      Nav.init(); Theme.init(); Shortcuts.init(); ErrorHandler.init();
-      TabController.init(); AccordionController.init(); AccountUI.init();
+      // Core (all pages) — each wrapped so one failure can't silently
+      // block everything after it (including OrdersModule's bind()).
+      const coreSteps = [
+        ['Auth.hydrate', () => Auth.hydrate()],
+        ['Modal.init', () => Modal.init()],
+        ['Drawer.init', () => Drawer.init()],
+        ['Dropdown.init', () => Dropdown.init()],
+        ['Tooltip.init', () => Tooltip.init()],
+        ['Nav.init', () => Nav.init()],
+        ['Theme.init', () => Theme.init()],
+        ['Shortcuts.init', () => Shortcuts.init()],
+        ['ErrorHandler.init', () => ErrorHandler.init()],
+        ['TabController.init', () => TabController.init()],
+        ['AccordionController.init', () => AccordionController.init()],
+        ['AccountUI.init', () => AccountUI.init()],
+      ];
+      for (const [name, fn] of coreSteps) {
+        try { fn(); } catch (e) { Log.error(`Core init failed: ${name}`, e); }
+      }
       refreshIcons();
 
       const page = document.body.dataset.page || 'dashboard';
