@@ -504,7 +504,7 @@ async def admin_order_action(
 ):
     action = payload.get("action")
     manual_content = payload.get("manual_content")
-    if action not in ["complete", "deliver", "reject", "cancel", "ship"]:
+    if action not in ["confirm", "complete", "deliver", "reject", "cancel", "ship"]:
         raise HTTPException(status_code=400, detail="Invalid fulfillment action specified.")
     return await process_admin_order_action(db, order_id, action, manual_content)
 

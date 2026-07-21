@@ -472,6 +472,31 @@ async def process_admin_order_action(
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order instance was not found.")
         
+    if action == "confirm":
+        if order.status != OrderStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Only pending orders can be confirmed. This order is currently '{order.status.value}'."
+            )
+
+        order.status = OrderStatus.PROCESSING
+        order.fulfillment_note = manual_content or "We've received your order and it's now being processed."
+        order.updated_at = datetime.utcnow()
+        await db.commit()
+
+        try:
+            await send_fulfillment_email(
+                user_email=order.customer_email,
+                product_name="Your Rocky Trendy Realities Order",
+                order_reference=order.order_reference,
+                manual_text=order.fulfillment_note
+            )
+        except Exception as e:
+            logger.error(f"Failed to send confirmation email for order {order.order_reference}: {e}")
+
+        log_action("order_confirmed_by_admin", actor="admin", order_reference=order.order_reference)
+        return {"status": "processing", "detail": "Order confirmed and moved to processing."}
+
     if action == "cancel":
         for item in order.items:
             prod_query = select(Product).where(Product.id == item.product_id).with_for_update()
