@@ -1078,8 +1078,15 @@
         this.apply();
       } catch (e) {
         Log.warn('orders load', e.message);
-        this.tbody.innerHTML = `<tr><td colspan="10">${UI.empty('shopping-bag', e.status === 401 ? 'Sign in to view orders' : 'Unable to load orders', '')}</td></tr>`;
-        refreshIcons();
+        Notify.error(`Couldn't load full order list: ${e.message || 'unknown error'}`);
+        // Fall back to whatever the dashboard widget already fetched successfully,
+        // so "View" on those rows still works even though this larger fetch failed.
+        const cached = Store.get('orders') || [];
+        if (cached.length) { this.state.all = cached; this.apply(); }
+        else {
+          this.tbody.innerHTML = `<tr><td colspan="10">${UI.empty('shopping-bag', e.status === 401 ? 'Sign in to view orders' : 'Unable to load orders', '')}</td></tr>`;
+          refreshIcons();
+        }
       }
     },
     apply() {
