@@ -479,11 +479,45 @@ async def process_admin_order_action(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order instance was not found.")
         
     if action == "confirm":
-        if order.status != OrderStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Only pending orders can be confirmed. This order is currently '{order.status.value}'."
-            )
+        if order.payment_method == PaymentMethod.PAYSTACK:
+            # Paystack orders must be independently verified as paid before an admin
+            # can move them forward — a PENDING Paystack order may simply be one the
+            # customer cancelled or abandoned, and stock is only released for those
+            # once reconciliation runs. Re-verify with Paystack directly here rather
+            # than trusting the stored status, which may be stale.
+            if order.status == OrderStatus.PENDING and order.payment_reference:
+                verify_result = await verify_transaction(order.payment_reference)
+                if (verify_result or {}).get("status") == "success":
+                    order.status = OrderStatus.PAID
+                    order.updated_at = datetime.utcnow()
+                    tx_query = select(Transaction).where(Transaction.tx_hash == order.payment_reference)
+                    tx_result = await db.execute(tx_query)
+                    transaction = tx_result.scalar_one_or_none()
+                    if transaction:
+                        transaction.status = "confirmed"
+                    await db.commit()
+                else:
+                    await _release_reserved_stock(db, order)
+                    order.status = OrderStatus.FAILED
+                    order.updated_at = datetime.utcnow()
+                    await db.commit()
+                    log_action("order_failed_admin_reverify", actor="admin", order_reference=order.order_reference)
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Paystack has not confirmed payment for this order — it's been marked Failed and stock released."
+                    )
+
+            if order.status != OrderStatus.PAID:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Only paid orders can be confirmed. This order is currently '{order.status.value}'."
+                )
+        else:
+            if order.status != OrderStatus.PENDING:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Only pending orders can be confirmed. This order is currently '{order.status.value}'."
+                )
 
         order.status = OrderStatus.PROCESSING
         order.fulfillment_note = manual_content or "We've received your order and it's now being processed."
@@ -518,6 +552,11 @@ async def process_admin_order_action(
         return {"status": "cancelled", "detail": "Order has been cancelled."}
         
     if action == "ship":
+        if order.payment_method == PaymentMethod.PAYSTACK and order.status not in (OrderStatus.PAID, OrderStatus.PROCESSING):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot ship — order is '{order.status.value}', not confirmed as paid."
+            )
         order.status = OrderStatus.SHIPPED
         order.fulfillment_note = manual_content or "Your order has been shipped and is on its way."
         order.updated_at = datetime.utcnow()
@@ -655,3 +694,60 @@ async def process_paystack_callback(db: AsyncSession, reference: str) -> Dict[st
     order.updated_at = datetime.utcnow()
     await db.commit()
     return {"status": order.status.value, "order_reference": order.order_reference, "detail": f"Paystack reported '{ps_status}'."}
+
+async def reconcile_stale_pending_orders(db: AsyncSession, older_than_minutes: int = 20) -> int:
+    """
+    Safety net for orders that never make it back through the callback flow at all —
+    cancelled checkouts, closed tabs, dropped connections, etc. Paystack never sends a
+    webhook for these, and process_paystack_callback only runs if the customer's browser
+    happens to land back on the storefront. This actively re-verifies each stale PENDING
+    Paystack order directly against Paystack's API and reconciles it, so a never-paid
+    order can't sit in the dashboard indefinitely looking like a live one, with its stock
+    still locked away. Intended to be run periodically (see reconcile_orders_loop in main.py).
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=older_than_minutes)
+    stmt = (
+        select(Order)
+        .where(Order.status == OrderStatus.PENDING)
+        .where(Order.payment_method == PaymentMethod.PAYSTACK)
+        .where(Order.payment_reference.isnot(None))
+        .where(Order.created_at < cutoff)
+        .options(selectinload(Order.items))
+    )
+    result = await db.execute(stmt)
+    stale_orders = result.scalars().all()
+
+    reconciled_count = 0
+    for order in stale_orders:
+        try:
+            verify_result = await verify_transaction(order.payment_reference)
+        except HTTPException as e:
+            logger.warning(f"Reconciliation: verify failed for {order.order_reference}: {e.detail}")
+            continue
+
+        ps_status = (verify_result or {}).get("status")
+        tx_query = select(Transaction).where(Transaction.tx_hash == order.payment_reference)
+        tx_result = await db.execute(tx_query)
+        transaction = tx_result.scalar_one_or_none()
+
+        if ps_status == "success":
+            order.status = OrderStatus.PAID
+            if transaction:
+                transaction.status = "confirmed"
+            log_action("order_paid_reconciled", actor="system", order_reference=order.order_reference)
+        else:
+            # Covers 'abandoned' (cancelled at checkout), 'failed', 'reversed', and cases
+            # where Paystack still reports the transaction as pending after the window closes.
+            await _release_reserved_stock(db, order)
+            order.status = OrderStatus.FAILED
+            if transaction:
+                transaction.status = "failed"
+            log_action("order_failed_reconciled", actor="system", order_reference=order.order_reference, metadata={"paystack_status": ps_status})
+
+        order.updated_at = datetime.utcnow()
+        reconciled_count += 1
+
+    if reconciled_count:
+        await db.commit()
+
+    return reconciled_count

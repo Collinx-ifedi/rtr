@@ -58,6 +58,7 @@ from .services import (
     process_admin_order_action,
     process_paystack_webhook,
     process_paystack_callback,
+    reconcile_stale_pending_orders,
     moderate_user_service
 )
 from .ai_services import get_ai_service, AIService
@@ -131,6 +132,24 @@ async def cleanup_unverified_users():
             logger.error(f"Background cleanup task exception: {e}")
         await asyncio.sleep(3600)  # Run hourly
 
+async def reconcile_stale_orders_loop():
+    """
+    Background safety net for orders stuck at PENDING because the customer cancelled,
+    closed the tab, or otherwise never made it back through Paystack's callback flow.
+    Actively re-verifies each one against Paystack directly instead of waiting on the
+    browser — see reconcile_stale_pending_orders in services.py.
+    """
+    while True:
+        try:
+            async for db in get_db():
+                count = await reconcile_stale_pending_orders(db, older_than_minutes=20)
+                if count > 0:
+                    logger.info(f"Order Reconciler: Resolved {count} stale pending order(s).")
+                break
+        except Exception as e:
+            logger.error(f"Background order reconciliation task exception: {e}")
+        await asyncio.sleep(300)  # Run every 5 minutes
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Rocky Trendy Realities system startup initiated...")
@@ -146,19 +165,23 @@ async def lifespan(app: FastAPI):
         await bootstrap_admins(db)
         break 
         
-    # Launch background worker
+    # Launch background workers
     cleanup_task = asyncio.create_task(cleanup_unverified_users())
-    logger.info("Background cleanup worker initialized.")
+    order_reconciler_task = asyncio.create_task(reconcile_stale_orders_loop())
+    logger.info("Background cleanup and order-reconciliation workers initialized.")
     logger.info(f"System startup complete. Serving API v{app.version}")
     
     yield
     
     logger.info("System shutdown sequence initiated...")
     cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        logger.info("Background cleanup worker cleanly terminated.")
+    order_reconciler_task.cancel()
+    for task in (cleanup_task, order_reconciler_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    logger.info("Background workers cleanly terminated.")
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
     logger.info("Shutdown complete.")
